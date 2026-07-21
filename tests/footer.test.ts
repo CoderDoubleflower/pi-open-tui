@@ -99,19 +99,19 @@ test("ASCII footer renders icons as semantic labels", () => {
 	const output = component.render(160).join("\n");
 
 	for (const expected of [
-		"dir",
-		"git main",
-		"M2",
+		"@",
+		"* main",
+		"!2",
 		"node 24.6.0",
-		"time working",
-		"ctx",
-		"model",
-		"think high",
-		"in 100",
-		"out 40",
-		"cache 50%",
-		"cost $0.125",
-		"ext goal active",
+		"o working",
+		"%",
+		"M",
+		"~ high",
+		"↑ 100",
+		"↓ 40",
+		"c 50%",
+		"$ $0.125",
+		"& goal active",
 	]) {
 		assert.ok(output.includes(expected), `missing ${expected}\n${output}`);
 	}

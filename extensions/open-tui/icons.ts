@@ -50,29 +50,32 @@ const NERD_GLYPHS: IconGlyphs = {
 	deleted: "✘",
 };
 
+// ponytail: ASCII fallback uses compact symbols (not English words) to keep
+// the footer's icon-like feel on non-Nerd-Font terminals. Symbols chosen to
+// avoid collisions with the git-status set {= S ! A ? r x ^ v}.
 const ASCII_GLYPHS: IconGlyphs = {
-	cwd: "dir",
-	git: "git",
-	working: "time",
-	done: "ok",
-	context: "ctx",
-	model: "model",
-	thinking: "think",
-	input: "in",
-	output: "out",
-	cacheHit: "cache",
-	cost: "cost",
-	extensions: "ext",
+	cwd: "@",
+	git: "*",
+	working: "o",
+	done: "+",
+	context: "%",
+	model: "M",
+	thinking: "~",
+	input: "↑",
+	output: "↓",
+	cacheHit: "c",
+	cost: "$",
+	extensions: "&",
 	ahead: "^",
 	behind: "v",
-	diverged: "<>",
-	conflicted: "!",
-	stashed: "$",
-	modified: "M",
+	diverged: "^v",
+	conflicted: "=",
+	stashed: "S",
+	modified: "!",
 	staged: "A",
 	untracked: "?",
-	renamed: "R",
-	deleted: "D",
+	renamed: "r",
+	deleted: "x",
 };
 
 const NERD_FONT_TERMINALS = new Set([
