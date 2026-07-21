@@ -109,7 +109,7 @@ test("ASCII footer renders icons as semantic labels", () => {
 		"~ high",
 		"↑ 100",
 		"↓ 40",
-		"c 50%",
+		"c 50.0%",
 		"$ $0.125",
 		"& goal active",
 	]) {
