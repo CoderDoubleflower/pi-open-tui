@@ -2,7 +2,7 @@
 
 A polished TUI for [Pi](https://pi.dev) coding agent. Combines the best of pi-haiku, pi-claude-code-tui, and pi-zentui into one cohesive package.
 
-![Preview](assets/preview_dashboard_1.png)
+![Preview](https://raw.githubusercontent.com/OldSuns/pi-open-tui/main/assets/preview_dashboard_1.png)
 
 ## What's in it
 
