@@ -2,6 +2,8 @@
 
 A polished TUI for [Pi](https://pi.dev) coding agent. Combines the best of pi-haiku, pi-claude-code-tui, and pi-zentui into one cohesive package.
 
+![Preview](assets/preview_dashboard_1.png)
+
 ## What's in it
 
 - **Animated Pi logo header** — 16-frame color-changing logo animation + "Let's build something great" tagline

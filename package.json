@@ -1,6 +1,6 @@
 {
   "name": "pi-open-tui",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A polished TUI for Pi coding agent: animated logo header, Starship-style footer, rounded editor with model metadata, and prompt-box user messages. Combines the best of pi-haiku, pi-claude-code-tui, and pi-zentui.",
   "type": "module",
   "keywords": [
@@ -15,6 +15,7 @@
   "license": "MIT",
   "files": [
     "extensions/",
+    "assets/",
     "README.md",
     "LICENSE"
   ],
@@ -25,7 +26,8 @@
   "pi": {
     "extensions": [
       "./extensions/open-tui/index.ts"
-    ]
+    ],
+    "image": "https://raw.githubusercontent.com/OldSuns/pi-open-tui/main/assets/preview_dashboard_1.png"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.80",
@@ -49,5 +51,10 @@
     "@earendil-works/pi-tui": "*",
     "@types/node": "^22.0.0",
     "typescript": "^5.5.0"
+  },
+  "allowScripts": {
+    "protobufjs@7.6.5": true,
+    "protobufjs@7.6.4": true,
+    "@google/genai@1.52.0": true
   }
 }
