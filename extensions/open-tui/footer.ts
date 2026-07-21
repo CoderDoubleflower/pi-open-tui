@@ -120,7 +120,9 @@ function renderContextBar(
 	const contextTokens = contextUsage?.tokens ?? 0;
 	const contextPct = contextUsage?.percent ?? 0;
 
-	if (contextTokens <= 0 || contextWindow <= 0) return "";
+	// ponytail: render 0% bar once we know the window — keeps the right side
+	// populated instead of collapsing everything left in an empty session.
+	if (contextWindow <= 0) return "";
 
 	const pctText = theme.fg(stressColor(contextPct), `${contextPct.toFixed(1)}%`);
 	const ctxText = `${theme.fg("text", fmtTokens(contextTokens))}${theme.fg("dim", "/")}${theme.fg("text", fmtTokens(contextWindow))}`;
@@ -138,13 +140,13 @@ function renderStatsBlock(
 ): string {
 	const stats: string[] = [];
 	if (segments.tokens) {
-		if (totals.input > 0) stats.push(theme.fg("accent", `${glyphs.input} ${fmtTokens(totals.input)}`));
-		if (totals.output > 0) stats.push(theme.fg("success", `${glyphs.output} ${fmtTokens(totals.output)}`));
+		stats.push(theme.fg("accent", `${glyphs.input} ${fmtTokens(totals.input)}`));
+		stats.push(theme.fg("success", `${glyphs.output} ${fmtTokens(totals.output)}`));
 		if (totals.latestCacheHitRate !== undefined) {
 			stats.push(theme.fg(cacheHitColor(totals.latestCacheHitRate), `${glyphs.cacheHit} ${totals.latestCacheHitRate.toFixed(0)}%`));
 		}
 	}
-	if (segments.cost && totals.cost > 0) {
+	if (segments.cost) {
 		stats.push(theme.fg("warning", `${glyphs.cost} $${totals.cost.toFixed(3)}`));
 	}
 
