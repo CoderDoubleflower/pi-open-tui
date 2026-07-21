@@ -132,7 +132,7 @@ function renderContextBar(
 	const ctxText = `${theme.fg("text", fmtTokens(contextTokens))}${theme.fg("dim", "/")}${theme.fg("text", fmtTokens(contextWindow))}`;
 	const contextIcon = theme.fg(stressColor(contextPct), glyphs.context);
 	const reserved = visibleWidth(contextIcon) + visibleWidth(pctText) + visibleWidth(ctxText) + 5 + 2;
-	const barWidth = Math.max(6, Math.min(16, width - reserved));
+	const barWidth = Math.max(4, Math.min(12, width - reserved));
 	return `${contextIcon} ${renderBar(theme, contextPct, barWidth, resolveIconMode(iconMode) === "ascii")} ${pctText} ${theme.fg("dim", "·")} ${ctxText}`;
 }
 
