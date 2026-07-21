@@ -101,7 +101,7 @@ export default function (pi: ExtensionAPI) {
 		const generation = sessionLifecycle.currentGeneration();
 		const cwd = ctx.cwd;
 		const git = await readGitStatus(cwd, {
-			readCommit: config.footerSegments.gitCommit,
+			readCommit: true,
 			readTag: config.footerSegments.gitCommit,
 		});
 		if (!sessionLifecycle.isCurrent(generation)) return;

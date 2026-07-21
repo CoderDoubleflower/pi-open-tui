@@ -83,7 +83,7 @@ export async function readGitStatus(
 				status.branch = undefined;
 				status.commit = { oid: null, detached: true, tag: null };
 			} else {
-				const branchMatch = branchPart.match(/^(\S+?)(?:\.\.\.(\S+))?(?:\s+\[(ahead|behind) (\d+)\])?/);
+				const branchMatch = branchPart.match(/^(\S+?)(?:\.\.\.(\S+))?(?:\s+\[(ahead|behind) (\d+)\])?$/);
 				if (branchMatch) {
 					status.branch = branchMatch[1];
 					if (branchMatch[3] === "ahead") status.ahead = parseInt(branchMatch[4]!, 10);

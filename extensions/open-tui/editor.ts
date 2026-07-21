@@ -3,7 +3,6 @@ import {
 	type ExtensionAPI,
 	type ExtensionContext,
 	type KeybindingsManager,
-	type Theme,
 } from "@earendil-works/pi-coding-agent";
 import type { EditorTheme, TUI } from "@earendil-works/pi-tui";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
@@ -45,11 +44,13 @@ export class OpenTuiEditor extends CustomEditor {
 		tui: TUI,
 		editorTheme: EditorTheme,
 		keybindings: KeybindingsManager,
-		getUiTheme: () => Theme,
 	) {
 		super(tui, editorTheme, keybindings, { paddingX: 0 });
-		this.getRail = () => getUiTheme().fg("accent", "│");
-		this.getBorder = (s: string) => getUiTheme().fg("borderMuted", s);
+		// ponytail: route the frame through this.borderColor so Pi can recolor it
+		// via updateEditorBorderColor() — bash mode ("! " prefix → green) and
+		// thinking-level borders both flow through this one property.
+		this.getRail = () => this.borderColor("│");
+		this.getBorder = (s: string) => this.borderColor(s);
 	}
 
 	override setPaddingX(_padding: number): void {
@@ -62,9 +63,8 @@ export class OpenTuiEditor extends CustomEditor {
 
 		const rail = this.getRail();
 		const borderPaint = this.getBorder;
-		const railWidth = 2;
-
-		const innerWidth = Math.max(0, width - railWidth);
+		// ponytail: 1-char rail + 1-char gap on each side = 4 chars of chrome.
+		const innerWidth = Math.max(0, width - 4);
 		const baseLines = super.render(innerWidth);
 		const bottomIdx = findBottomBorderIndex(baseLines);
 
@@ -74,9 +74,9 @@ export class OpenTuiEditor extends CustomEditor {
 		for (let i = 1; i < bottomIdx; i++) {
 			const line = baseLines[i] ?? "";
 			if (isEditorBorderLine(line)) {
-				result.push(`${rail} ${fillLine("", innerWidth)}`);
+				result.push(`${rail} ${fillLine("", innerWidth)} ${rail}`);
 			} else {
-				result.push(`${rail} ${fillLine(line, innerWidth)}`);
+				result.push(`${rail} ${fillLine(line, innerWidth)} ${rail}`);
 			}
 		}
 
@@ -91,9 +91,8 @@ export class OpenTuiEditor extends CustomEditor {
 }
 
 export function installEditor(_pi: ExtensionAPI, ctx: ExtensionContext): () => void {
-	const getUiTheme = () => ctx.ui.theme;
 	ctx.ui.setEditorComponent((tui, editorTheme, keybindings) =>
-		new OpenTuiEditor(tui, editorTheme, keybindings, getUiTheme),
+		new OpenTuiEditor(tui, editorTheme, keybindings),
 	);
 	return () => {
 		ctx.ui.setEditorComponent(undefined);

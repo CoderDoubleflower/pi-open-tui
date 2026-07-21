@@ -24,6 +24,26 @@ export function formatCwd(cwd: string): string {
 	return rel === "" ? "~" : `~${sep}${rel}`;
 }
 
+export function truncatePath(path: string, maxLen: number): string {
+	if (path.length <= maxLen) return path;
+	if (maxLen <= 3) return "...".slice(0, maxLen);
+	const sepChar = path.includes("/") ? "/" : "\\";
+	const parts = path.split(/[\\/]/);
+	if (parts.length <= 2) return path.slice(0, maxLen - 3) + "...";
+	// Keep first segment (e.g. ~) and as many trailing segments as fit.
+	const tail: string[] = [];
+	let tailLen = 0;
+	for (let i = parts.length - 1; i >= 1; i--) {
+		const seg = parts[i]!;
+		if (tailLen + seg.length + 4 > maxLen) break;
+		tail.unshift(seg);
+		tailLen += seg.length + 1;
+	}
+	const head = parts[0]!;
+	const result = `${head}${sepChar}...${sepChar}${tail.join(sepChar)}`;
+	return result.length > maxLen ? result.slice(0, maxLen - 3) + "..." : result;
+}
+
 export function fmtTokens(n: number): string {
 	if (n < 1000) return n.toString();
 	if (n < 10_000) return `${(n / 1000).toFixed(1)}k`;
@@ -68,6 +88,51 @@ export function alignRight(left: string, right: string, width: number, theme: Th
 	const truncatedLeft =
 		availableForLeft > 0 ? truncateToWidth(left, availableForLeft, theme.fg("dim", "...")) : "";
 	return truncatedLeft ? truncatedLeft + " " + right : right;
+}
+
+export type PrioritizedSegment = {
+	text: string;
+	priority: number;
+};
+
+/**
+ * Pack segments into maxWidth, shrinking/dropping lowest-priority segments first.
+ * Higher priority = survives longer. Returns the surviving segment texts in
+ * original order, space-joined. Each segment is either kept whole, truncated
+ * with ellipsis, or dropped entirely.
+ */
+export function fitSegmentsByPriority(
+	segs: readonly PrioritizedSegment[],
+	maxW: number,
+	ellipsis = "...",
+): string[] {
+	const items = segs.map((s) => ({ text: s.text, priority: s.priority, w: visibleWidth(s.text) }));
+	const totalW = () => {
+		const active = items.filter((it) => it.text !== "");
+		return active.reduce((a, it) => a + it.w, 0) + Math.max(0, active.length - 1);
+	};
+	while (totalW() > maxW) {
+		let target = -1;
+		for (let i = 0; i < items.length; i++) {
+			if (items[i].text !== "" && (target === -1 || items[i].priority < items[target].priority)) {
+				target = i;
+			}
+		}
+		if (target === -1) break;
+		const others = items.filter((_, i) => i !== target && items[i].text !== "");
+		const otherW = others.reduce((a, it) => a + it.w, 0) + Math.max(0, others.length - 1);
+		const avail = maxW - otherW - (others.length > 0 ? 1 : 0);
+		if (avail <= visibleWidth(ellipsis)) {
+			items[target].text = "";
+			items[target].w = 0;
+		} else if (avail < items[target].w) {
+			items[target].text = truncateToWidth(items[target].text, avail, ellipsis);
+			items[target].w = visibleWidth(items[target].text);
+		} else {
+			break;
+		}
+	}
+	return items.filter((it) => it.text !== "").map((it) => it.text);
 }
 
 export function stressColor(value: number, warn = 70, danger = 90): ThemeColor {
@@ -154,4 +219,111 @@ export function sanitizeStatus(text: string): string {
 		.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
 		.replace(/ +/g, " ")
 		.trim();
+}
+
+export function formatThinkingLabel(level: string): string {
+	if (level === "off") return "thinking off";
+	return `${level} effort`;
+}
+
+export const PI_BUILTIN_SLASH_COMMAND_NAMES = [
+	"settings",
+	"model",
+	"scoped-models",
+	"export",
+	"import",
+	"share",
+	"copy",
+	"name",
+	"session",
+	"changelog",
+	"hotkeys",
+	"fork",
+	"clone",
+	"tree",
+	"trust",
+	"login",
+	"logout",
+	"new",
+	"compact",
+	"resume",
+	"reload",
+	"quit",
+] as const;
+
+export function collectPiCommandNames(sessionCommands: readonly { name: string }[]): string[] {
+	const names = new Set<string>(PI_BUILTIN_SLASH_COMMAND_NAMES);
+	for (const command of sessionCommands) {
+		if (command.name) names.add(command.name);
+	}
+	return [...names];
+}
+
+export function pickSlashCommandTips(
+	availableNames: readonly string[],
+	options: {
+		fixed?: readonly string[];
+		count?: number;
+		exclude?: readonly string[];
+		random?: () => number;
+	} = {},
+): string[] {
+	const fixed = [...(options.fixed ?? [])];
+	const count = options.count ?? 3;
+	const exclude = new Set<string>([...(options.exclude ?? []), ...fixed]);
+	const random = options.random ?? Math.random;
+
+	const pool = [...new Set(availableNames.map((n) => n.trim()).filter(Boolean))].filter(
+		(name) => !exclude.has(name),
+	);
+
+	for (let i = pool.length - 1; i > 0; i--) {
+		const j = Math.floor(random() * (i + 1));
+		const tmp = pool[i]!;
+		pool[i] = pool[j]!;
+		pool[j] = tmp;
+	}
+
+	const picked = pool.slice(0, Math.max(0, count));
+	return [...fixed, ...picked].map((name) => (name.startsWith("/") ? name : `/${name}`));
+}
+
+export const MIN_LEFT_WIDTH = 28;
+export const MIN_TIPS_WIDTH = 16;
+export const MAX_TIPS_WIDTH = 28;
+const COLUMN_GAP = 3;
+
+export function headerColumnWidths(
+	innerWidth: number,
+	minTipsWidth = MIN_TIPS_WIDTH,
+	maxTipsWidth = MAX_TIPS_WIDTH,
+	minLeftWidth = MIN_LEFT_WIDTH,
+): { leftWidth: number; rightWidth: number; useTips: boolean } {
+	if (innerWidth <= 0) {
+		return { leftWidth: 0, rightWidth: 0, useTips: false };
+	}
+
+	const gap = COLUMN_GAP;
+	if (innerWidth < minLeftWidth + gap + minTipsWidth) {
+		return { leftWidth: innerWidth, rightWidth: 0, useTips: false };
+	}
+
+	let rightWidth = Math.min(maxTipsWidth, Math.max(minTipsWidth, Math.round(innerWidth * 0.28)));
+	let leftWidth = innerWidth - gap - rightWidth;
+
+	if (leftWidth < minLeftWidth) {
+		leftWidth = minLeftWidth;
+		rightWidth = innerWidth - gap - leftWidth;
+	}
+
+	if (leftWidth <= rightWidth) {
+		leftWidth = Math.ceil((innerWidth - gap) * 0.65);
+		rightWidth = innerWidth - gap - leftWidth;
+	}
+
+	if (rightWidth < minTipsWidth || leftWidth < minLeftWidth) {
+		return { leftWidth: innerWidth, rightWidth: 0, useTips: false };
+	}
+
+	return { leftWidth, rightWidth, useTips: true };
 }

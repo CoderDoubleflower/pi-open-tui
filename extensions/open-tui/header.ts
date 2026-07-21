@@ -1,9 +1,19 @@
 import { VERSION, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { Component, TUI } from "@earendil-works/pi-tui";
-import { center, truncateToWidth } from "./utils.ts";
+import {
+	center,
+	collectPiCommandNames,
+	formatCwd,
+	formatModelLabel,
+	formatThinkingLabel,
+	headerColumnWidths,
+	padRight,
+	pickSlashCommandTips,
+	truncateToWidth,
+	visibleWidth,
+} from "./utils.ts";
 
 const LOGO_CELL = "███";
-const LOGO_ANIMATION_MS = 80;
 
 type LogoColor = "panel" | "cyan" | "red" | "green" | "orange" | "white" | "flash" | "brand";
 type LogoFrame = { phase: number; active: "left" | "top" | "right" | "none"; ax: number; ay: number; flash: boolean; white: boolean };
@@ -116,50 +126,107 @@ function renderLogo(frameIndex: number, paintBrand: (text: string) => string): s
 	});
 }
 
-export class OpenTuiHeader implements Component {
-	private frame = 0;
-	private readonly timer: ReturnType<typeof setInterval>;
-	private readonly ctx: ExtensionContext;
+function borderLine(
+	left: string,
+	label: string,
+	right: string,
+	width: number,
+	paint: (text: string) => string,
+): string {
+	if (width <= 1) return "";
+	if (width < 8 || label.length === 0) {
+		return paint(truncateToWidth(left + "─".repeat(Math.max(0, width - 2)) + right, width, ""));
+	}
 
-	constructor(_pi: ExtensionAPI, ctx: ExtensionContext, tui: TUI) {
+	const before = "─── ";
+	const after = " ─────";
+	const fixedWidth = visibleWidth(before) + visibleWidth(label) + visibleWidth(after);
+	const fill = Math.max(0, width - 2 - fixedWidth);
+	return `${paint(left)}${paint(before)}${label}${paint(after)}${paint("─".repeat(fill))}${paint(right)}`;
+}
+
+function boxedLine(content: string, width: number, paint: (text: string) => string): string {
+	if (width <= 2) return truncateToWidth(content, width, "");
+	return `${paint("│")}${padRight(content, width - 2)}${paint("│")}`;
+}
+
+function twoColumn(
+	left: string,
+	right: string,
+	leftWidth: number,
+	rightWidth: number,
+	paint: (text: string) => string,
+): string {
+	return `${padRight(left, leftWidth)} ${paint("│")} ${padRight(right, rightWidth, "…")}`;
+}
+
+export class OpenTuiHeader implements Component {
+	private readonly pi: ExtensionAPI;
+	private readonly ctx: ExtensionContext;
+	private readonly frame = LOGO_FRAMES.length - 1;
+	private readonly tipCommands: string[];
+
+	constructor(pi: ExtensionAPI, ctx: ExtensionContext, _tui: TUI) {
+		this.pi = pi;
 		this.ctx = ctx;
-		this.timer = setInterval(() => {
-			if (this.frame < LOGO_FRAMES.length - 1) {
-				this.frame++;
-				tui.requestRender();
-			} else {
-				clearInterval(this.timer);
-			}
-		}, LOGO_ANIMATION_MS);
-		this.timer.unref?.();
+		const pool = collectPiCommandNames(pi.getCommands());
+		this.tipCommands = pickSlashCommandTips(pool, {
+			fixed: ["open-tui"],
+			count: 3,
+		});
 	}
 
 	render(width: number): string[] {
 		const theme = this.ctx.ui.theme;
 		const paint = (s: string) => theme.fg("accent", s);
 		const muted = (s: string) => theme.fg("muted", s);
+		const dim = (s: string) => theme.fg("dim", s);
 		const bold = (s: string) => theme.bold(s);
 
 		if (width < 24) return [paint(`Pi v${VERSION}`)];
 
-		const lines: string[] = [];
-		lines.push(bold(theme.fg("accent", "pi")) + " " + muted(`v${VERSION}`));
-		lines.push("");
+		const innerWidth = width - 2;
+		const { leftWidth, rightWidth, useTips } = headerColumnWidths(innerWidth);
+		const model = formatModelLabel(this.ctx.model);
+		const effort = formatThinkingLabel(this.pi.getThinkingLevel());
+		const cwd = formatCwd(this.ctx.cwd);
 
-		for (const logoLine of renderLogo(this.frame, paint)) {
-			lines.push(center(logoLine, width));
+		const leftLines = [
+			...renderLogo(this.frame, paint).map((line) => center(line, leftWidth)),
+			center(bold("Let's build something great"), leftWidth),
+			center(muted(`${model} · ${effort}`), leftWidth),
+			center(dim(cwd), leftWidth),
+		];
+
+		const tipDivider = paint("─".repeat(Math.max(8, Math.min(rightWidth, 22))));
+		const [cmd0 = "", cmd1 = "", cmd2 = "", cmd3 = ""] = this.tipCommands;
+		const tipLines = [
+			"",
+			paint(bold("Welcome")),
+			muted("Ask Pi anything"),
+			tipDivider,
+			paint(bold("Commands")),
+			muted(cmd0),
+			muted(cmd1),
+			muted(cmd2),
+			muted(cmd3),
+			"",
+		];
+
+		const lines = [borderLine("╭", `${paint("Pi")} v${VERSION}`, "╮", width, paint)];
+		for (let i = 0; i < leftLines.length; i++) {
+			const content = useTips
+				? twoColumn(leftLines[i] ?? "", tipLines[i] ?? "", leftWidth, rightWidth, paint)
+				: padRight(leftLines[i] ?? "", leftWidth);
+			lines.push(boxedLine(content, width, paint));
 		}
-
-		lines.push(center(bold("Let's build something great"), width));
-
+		lines.push(borderLine("╰", "", "╯", width, paint));
 		return lines.map((line) => truncateToWidth(line, width, ""));
 	}
 
 	invalidate(): void {}
 
-	dispose(): void {
-		clearInterval(this.timer);
-	}
+	dispose(): void {}
 }
 
 export function installHeader(pi: ExtensionAPI, ctx: ExtensionContext): () => void {

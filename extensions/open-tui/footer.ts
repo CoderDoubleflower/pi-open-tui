@@ -9,6 +9,7 @@ import {
 	alignRight,
 	cacheHitColor,
 	effortColor,
+	fitSegmentsByPriority,
 	fmtTokens,
 	formatCwd,
 	formatDuration,
@@ -16,6 +17,7 @@ import {
 	providerColor,
 	sanitizeStatus,
 	stressColor,
+	truncatePath,
 } from "./utils.ts";
 import type { FooterState, ModelMeta, UsageTotals } from "./state.ts";
 import { getUsageTotals } from "./state.ts";
@@ -39,35 +41,37 @@ function renderGitSegment(
 	git: GitStatus,
 	glyphs: IconGlyphs,
 	segments: OpenTuiConfig["footerSegments"],
+	maxBranchLen = 20,
 ): string {
 	const parts: string[] = [];
 	if (segments.gitBranch) {
 		if (git.branch) {
 			parts.push(theme.fg("mdLink", glyphs.git));
-			parts.push(theme.fg("success", git.branch));
+			parts.push(theme.fg("mdLink", truncatePath(git.branch, maxBranchLen)));
 		} else if (git.commit?.detached) {
-			parts.push(theme.fg("mdLink", glyphs.git));
-			parts.push(theme.fg("success", "HEAD"));
-			if (segments.gitCommit && git.commit.oid) {
+			parts.push(theme.fg("warning", glyphs.git));
+			parts.push(theme.fg("warning", "HEAD"));
+			if (git.commit.oid) {
 				const shortHash = git.commit.oid.slice(0, 7);
 				const tag = git.commit.tag ? ` ${git.commit.tag}` : "";
-				parts.push(theme.fg("success", `(${shortHash}${tag})`));
+				parts.push(theme.fg("dim", `${shortHash}${tag}`));
 			}
 		}
 	}
 
 	if (segments.gitStatus) {
 		const statusIcons: string[] = [];
+		// ponytail: always show count — `!1` not `!`, so 1 vs 100 is distinguishable.
 		const addStatus = (count: number, glyph: string, color: ThemeColor) => {
-			if (count > 0) statusIcons.push(theme.fg(color, `${glyph}${count > 1 ? count : ""}`));
+			if (count > 0) statusIcons.push(theme.fg(color, `${glyph}${count}`));
 		};
 		addStatus(git.conflicted, glyphs.conflicted, "error");
-		addStatus(git.stashed, glyphs.stashed, "muted");
 		addStatus(git.deleted, glyphs.deleted, "error");
-		addStatus(git.renamed, glyphs.renamed, "warning");
 		addStatus(git.modified, glyphs.modified, "warning");
+		addStatus(git.renamed, glyphs.renamed, "warning");
 		addStatus(git.staged, glyphs.staged, "success");
 		addStatus(git.untracked, glyphs.untracked, "muted");
+		addStatus(git.stashed, glyphs.stashed, "muted");
 
 		if (git.ahead > 0 && git.behind > 0) {
 			statusIcons.push(theme.fg("warning", `${glyphs.diverged}${git.ahead}/${git.behind}`));
@@ -209,25 +213,32 @@ export function installFooter(
 
 				const totals = getUsageTotals(ctx);
 
-				const leftParts: string[] = [];
+				const leftParts: { text: string; priority: number }[] = [];
 				if (segments.cwd) {
-					leftParts.push(`${theme.fg("mdLink", glyphs.cwd)} ${theme.fg("accent", formatCwd(ctx.sessionManager.getCwd()))}`);
+					const maxCwd = Math.min(30, Math.max(10, Math.floor(width * 0.4)));
+					leftParts.push({
+						text: `${theme.fg("mdLink", glyphs.cwd)} ${theme.fg("accent", truncatePath(formatCwd(ctx.sessionManager.getCwd()), maxCwd))}`,
+						priority: 0,
+					});
 				}
 				const gitSeg = renderGitSegment(theme, state.git, glyphs, segments);
-				if (gitSeg) leftParts.push(gitSeg);
+				if (gitSeg) leftParts.push({ text: gitSeg, priority: 3 });
 				if (segments.runtime) {
 					const runtimeSeg = renderRuntimeSegment(theme, state.runtime, config.icons.mode);
-					if (runtimeSeg) leftParts.push(runtimeSeg);
+					if (runtimeSeg) leftParts.push({ text: runtimeSeg, priority: 1 });
 				}
 				const timerSeg = renderTimerSegment(theme, state, glyphs);
-				if (timerSeg) leftParts.push(timerSeg);
+				if (timerSeg) leftParts.push({ text: timerSeg, priority: 2 });
 
 				let rightBlock = "";
 				if (segments.context) {
 					rightBlock = renderContextBar(theme, ctx, width, glyphs, config.icons.mode);
 				}
 
-				const line1 = alignRight(leftParts.join(" "), rightBlock, width, theme);
+				const rightW = visibleWidth(rightBlock);
+				const availLeft = Math.max(0, width - rightW - (rightBlock ? 1 : 0));
+				const fittedLeft = fitSegmentsByPriority(leftParts, availLeft, theme.fg("dim", "..."));
+				const line1 = alignRight(fittedLeft.join(" "), rightBlock, width, theme);
 
 				const modelParts: string[] = [];
 				modelParts.push(theme.fg("mdLink", glyphs.model));
