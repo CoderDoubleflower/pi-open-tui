@@ -10,9 +10,8 @@ A polished TUI for [Pi](https://pi.dev) coding agent. Combines the best of pi-ha
 - **60+ runtime detection** — Node, Rust, Go, Python, Ruby, Java, Swift, Kotlin, C/C++, Deno, Bun, and many more
 - **Git status** — branch, ahead/behind, modified/untracked/staged/stashed, detached HEAD commit hash + tag
 - **Working timer** — live elapsed time while the agent is working, done duration when finished
-- **Zero prototype patches** — uses only public Pi APIs (setHeader/setFooter/setEditorComponent), safe across Pi updates
+- **Zero prototype patches** — uses public Pi APIs (setHeader/setFooter/setEditorComponent), safe across Pi updates
 - **Interactive settings UI** — `/open-tui` opens a tabbed settings dialog (Features / Icons / Segments)
-- **Auto-collapse resources** — collapses pi's `[Context]`/`[Skills]`/`[Extensions]` startup sections on launch (toggle in settings; press `Ctrl+O` to expand manually)
 
 ## Install
 
@@ -33,7 +32,6 @@ Run `/open-tui` to open the interactive settings UI. Configuration is stored at 
 ```json
 {
   "enabled": true,
-  "autoCollapseResources": true,
   "icons": {
     "mode": "auto"
   },
@@ -52,7 +50,6 @@ Run `/open-tui` to open the interactive settings UI. Configuration is stored at 
 
 - `icons.mode`: `auto` (detect Nerd Font), `nerd` (force Nerd Font glyphs), or `ascii` (plain fallbacks)
 - `footerSegments.gitCommit`: shows short hash + tag on detached HEAD (off by default)
-- `autoCollapseResources`: collapses pi's `[Context]`/`[Skills]`/`[Extensions]` startup sections on launch (on by default; press `Ctrl+O` to toggle expansion)
 
 ## Local development
 

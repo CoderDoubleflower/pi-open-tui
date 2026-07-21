@@ -46,22 +46,12 @@ function toggleEnabled(config: OpenTuiConfig): OpenTuiConfig {
 	return { ...config, enabled: !config.enabled };
 }
 
-function toggleAutoCollapse(config: OpenTuiConfig): OpenTuiConfig {
-	return { ...config, autoCollapseResources: !config.autoCollapseResources };
-}
-
 function buildFeaturesItems(config: OpenTuiConfig): SettingItem[] {
 	return [
 		{
 			id: "enabled",
 			label: "Enabled",
 			currentValue: config.enabled ? "on" : "off",
-			values: ["on", "off"],
-		},
-		{
-			id: "autoCollapse",
-			label: "Auto-collapse resources",
-			currentValue: config.autoCollapseResources ? "on" : "off",
 			values: ["on", "off"],
 		},
 	];
@@ -107,9 +97,6 @@ function handleSettingChange(
 ): OpenTuiConfig {
 	if (tab === "features" && itemId === "enabled") {
 		return toggleEnabled(config);
-	}
-	if (tab === "features" && itemId === "autoCollapse") {
-		return toggleAutoCollapse(config);
 	}
 	if (tab === "icons" && itemId === "mode") {
 		return cycleIconMode(config);

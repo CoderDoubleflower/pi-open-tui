@@ -18,7 +18,6 @@ export interface FooterSegments {
 
 export interface OpenTuiConfig {
 	enabled: boolean;
-	autoCollapseResources: boolean;
 	icons: {
 		mode: IconMode;
 	};
@@ -27,7 +26,6 @@ export interface OpenTuiConfig {
 
 export const DEFAULT_CONFIG: OpenTuiConfig = {
 	enabled: true,
-	autoCollapseResources: true,
 	icons: {
 		mode: "auto",
 	},

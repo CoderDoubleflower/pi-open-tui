@@ -68,22 +68,25 @@ function selectedLine(component: SettingsComponent): string {
 test("keeps the changed setting selected", async () => {
 	const settings = await openSettings();
 
+	settings.component.handleInput("\t");
+	settings.component.handleInput("\t");
 	settings.component.handleInput("\x1b[B");
-	assert.match(selectedLine(settings.component), /Auto-collapse resources/);
+	assert.match(selectedLine(settings.component), /git branch/);
 
 	settings.component.handleInput("\r");
-	assert.equal(settings.getConfig().autoCollapseResources, false);
-	assert.match(selectedLine(settings.component), /Auto-collapse resources/);
+	assert.equal(settings.getConfig().footerSegments.gitBranch, false);
+	assert.match(selectedLine(settings.component), /git branch/);
 });
 
 test("remembers the selection for each tab", async () => {
 	const settings = await openSettings();
 
-	settings.component.handleInput("\x1b[B");
 	settings.component.handleInput("\t");
 	settings.component.handleInput("\t");
 	settings.component.handleInput("\x1b[B");
+	settings.component.handleInput("\t");
+	settings.component.handleInput("\t");
 	settings.component.handleInput("\t");
 
-	assert.match(selectedLine(settings.component), /Auto-collapse resources/);
+	assert.match(selectedLine(settings.component), /git branch/);
 });

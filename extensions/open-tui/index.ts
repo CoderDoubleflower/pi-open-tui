@@ -163,14 +163,6 @@ export default function (pi: ExtensionAPI) {
 
 		applyUi(ctx);
 
-		if (config.enabled && config.autoCollapseResources && isTuiContext(ctx)) {
-			// ponytail: defer past showLoadedResources which runs after session_start handlers
-			setTimeout(() => {
-				if (!sessionLifecycle.isCurrent() || !active) return;
-				ctx.ui.setToolsExpanded(false);
-			}, 0);
-		}
-
 		refreshInteractiveState(ctx, true);
 	});
 
@@ -234,8 +226,6 @@ export default function (pi: ExtensionAPI) {
 		getConfig: () => config,
 		onConfigChanged: (newConfig) => {
 			const wasEnabled = config.enabled;
-			const shouldCollapseResources = newConfig.autoCollapseResources
-				&& (!config.autoCollapseResources || (!config.enabled && newConfig.enabled));
 			saveConfig(newConfig);
 			config = newConfig;
 			if (lastCtx && wasEnabled !== newConfig.enabled) {
@@ -244,9 +234,6 @@ export default function (pi: ExtensionAPI) {
 				} else {
 					uninstallUi(lastCtx);
 				}
-			}
-			if (lastCtx && newConfig.enabled && shouldCollapseResources && isTuiContext(lastCtx)) {
-				lastCtx.ui.setToolsExpanded(false);
 			}
 			requestFooterRender?.();
 		},
