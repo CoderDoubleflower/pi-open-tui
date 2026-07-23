@@ -29,6 +29,9 @@ test("both icon modes provide every footer semantic", () => {
 		"output",
 		"cacheHit",
 		"cost",
+		"speed",
+		"latency",
+		"stall",
 		"extensions",
 	] as const;
 
@@ -107,8 +110,8 @@ test("ASCII footer renders icons as semantic labels", () => {
 		"%",
 		"M",
 		"~ high",
-		"↑ 100",
-		"↓ 40",
+		"↓ 100",
+		"↑ 40",
 		"c 50.0%",
 		"$ $0.125",
 		"& goal active",

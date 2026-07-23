@@ -12,6 +12,9 @@ export interface IconGlyphs {
 	output: string;
 	cacheHit: string;
 	cost: string;
+	speed: string;
+	latency: string;
+	stall: string;
 	extensions: string;
 	ahead: string;
 	behind: string;
@@ -37,6 +40,9 @@ const NERD_GLYPHS: IconGlyphs = {
 	output: "",
 	cacheHit: "",
 	cost: "",
+	speed: "󰓅",
+	latency: "",
+	stall: "",
 	extensions: "",
 	ahead: "↑",
 	behind: "↓",
@@ -61,10 +67,13 @@ const ASCII_GLYPHS: IconGlyphs = {
 	context: "%",
 	model: "M",
 	thinking: "~",
-	input: "↑",
-	output: "↓",
+	input: "↓",
+	output: "↑",
 	cacheHit: "c",
 	cost: "$",
+	speed: ">",
+	latency: "~",
+	stall: "!",
 	extensions: "&",
 	ahead: "^",
 	behind: "v",

@@ -7,6 +7,7 @@ import { readGitStatus } from "./git.ts";
 import { readRuntimeInfo } from "./runtime.ts";
 import { SessionLifecycle } from "./session-lifecycle.ts";
 import { registerSettingsCommand } from "./settings-command.ts";
+import { formatTurnTelemetry, TurnTelemetryTracker } from "./telemetry.ts";
 import {
 	createInitialState,
 	getModelMeta,
@@ -43,6 +44,7 @@ function isTuiContext(ctx: ExtensionContext): boolean {
 export default function (pi: ExtensionAPI) {
 	const sessionLifecycle = new SessionLifecycle();
 	const state: FooterState = createInitialState();
+	const turnTelemetry = new TurnTelemetryTracker();
 
 	let config: OpenTuiConfig = structuredClone(DEFAULT_CONFIG);
 	let active = false;
@@ -175,7 +177,8 @@ export default function (pi: ExtensionAPI) {
 		lastCtx = undefined;
 	});
 
-	pi.on("agent_start", (_event, _ctx) => {
+	pi.on("agent_start", (event, _ctx) => {
+		turnTelemetry.handle(event);
 		if (!sessionLifecycle.isCurrent()) return;
 		state.workingSince = Date.now();
 		state.lastDoneIn = undefined;
@@ -192,6 +195,34 @@ export default function (pi: ExtensionAPI) {
 		requestFooterRender?.();
 	});
 
+	pi.on("turn_start", (event) => {
+		turnTelemetry.handle(event);
+	});
+
+	pi.on("message_start", (event) => {
+		turnTelemetry.handle(event);
+	});
+
+	pi.on("message_update", (event) => {
+		turnTelemetry.handle(event);
+	});
+
+	pi.on("tool_execution_start", (event) => {
+		turnTelemetry.handle(event);
+	});
+
+	pi.on("turn_end", (event) => {
+		turnTelemetry.handle(event);
+	});
+
+	pi.on("agent_settled", (event, ctx) => {
+		const telemetry = turnTelemetry.handle(event);
+		if (telemetry && config.enabled && config.telemetry.enabled && isTuiContext(ctx)) {
+			const message = formatTurnTelemetry(telemetry, ctx.ui.theme, config.telemetry, config.icons.mode);
+			if (message) ctx.ui.notify(message, "info");
+		}
+	});
+
 	pi.on("model_select", (_event, ctx) => {
 		refreshInteractiveState(ctx);
 	});
@@ -200,7 +231,8 @@ export default function (pi: ExtensionAPI) {
 		refreshInteractiveState(ctx);
 	});
 
-	pi.on("message_end", (_event, ctx) => {
+	pi.on("message_end", (event, ctx) => {
+		turnTelemetry.handle(event);
 		if (!sessionLifecycle.isCurrent()) return;
 		invalidateUsageCache();
 		refreshInteractiveState(ctx);

@@ -87,6 +87,22 @@ test("remembers the selection for each tab", async () => {
 	settings.component.handleInput("\t");
 	settings.component.handleInput("\t");
 	settings.component.handleInput("\t");
+	settings.component.handleInput("\t");
 
 	assert.match(selectedLine(settings.component), /git branch/);
+});
+
+test("configures telemetry from its own tab", async () => {
+	const settings = await openSettings();
+
+	settings.component.handleInput("\t");
+	settings.component.handleInput("\t");
+	settings.component.handleInput("\t");
+	assert.match(selectedLine(settings.component), /Enabled/);
+
+	settings.component.handleInput("\r");
+	assert.equal(settings.getConfig().telemetry.enabled, false);
+	settings.component.handleInput("\x1b[B");
+	settings.component.handleInput("\r");
+	assert.equal(settings.getConfig().telemetry.tps, false);
 });

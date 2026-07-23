@@ -17,12 +17,13 @@ interface SettingItem {
 	values: string[];
 }
 
-type Tab = "features" | "icons" | "segments";
+type Tab = "features" | "icons" | "segments" | "telemetry";
 
 const TABS: { id: Tab; label: string }[] = [
 	{ id: "features", label: "Features" },
 	{ id: "icons", label: "Icons" },
 	{ id: "segments", label: "Segments" },
+	{ id: "telemetry", label: "Telemetry" },
 ];
 
 function toggleSetting(config: OpenTuiConfig, key: keyof OpenTuiConfig["footerSegments"]): OpenTuiConfig {
@@ -44,6 +45,13 @@ function cycleIconMode(config: OpenTuiConfig): OpenTuiConfig {
 
 function toggleEnabled(config: OpenTuiConfig): OpenTuiConfig {
 	return { ...config, enabled: !config.enabled };
+}
+
+function toggleTelemetry(config: OpenTuiConfig, key: keyof OpenTuiConfig["telemetry"]): OpenTuiConfig {
+	return {
+		...config,
+		telemetry: { ...config.telemetry, [key]: !config.telemetry[key] },
+	};
 }
 
 function buildFeaturesItems(config: OpenTuiConfig): SettingItem[] {
@@ -82,11 +90,25 @@ function buildSegmentsItems(config: OpenTuiConfig): SettingItem[] {
 	];
 }
 
+function buildTelemetryItems(config: OpenTuiConfig): SettingItem[] {
+	const telemetry = config.telemetry;
+	return [
+		{ id: "enabled", label: "Enabled", currentValue: telemetry.enabled ? "on" : "off", values: ["on", "off"] },
+		{ id: "tps", label: "TPS", currentValue: telemetry.tps ? "on" : "off", values: ["on", "off"] },
+		{ id: "ttft", label: "TTFT", currentValue: telemetry.ttft ? "on" : "off", values: ["on", "off"] },
+		{ id: "duration", label: "total duration", currentValue: telemetry.duration ? "on" : "off", values: ["on", "off"] },
+		{ id: "tokens", label: "token counts", currentValue: telemetry.tokens ? "on" : "off", values: ["on", "off"] },
+		{ id: "stalls", label: "stall details", currentValue: telemetry.stalls ? "on" : "off", values: ["on", "off"] },
+		{ id: "cost", label: "cost rate", currentValue: telemetry.cost ? "on" : "off", values: ["on", "off"] },
+	];
+}
+
 function buildItems(tab: Tab, config: OpenTuiConfig): SettingItem[] {
 	switch (tab) {
 		case "features": return buildFeaturesItems(config);
 		case "icons": return buildIconsItems(config);
 		case "segments": return buildSegmentsItems(config);
+		case "telemetry": return buildTelemetryItems(config);
 	}
 }
 
@@ -103,6 +125,9 @@ function handleSettingChange(
 	}
 	if (tab === "segments") {
 		return toggleSetting(config, itemId as keyof OpenTuiConfig["footerSegments"]);
+	}
+	if (tab === "telemetry") {
+		return toggleTelemetry(config, itemId as keyof OpenTuiConfig["telemetry"]);
 	}
 	return config;
 }

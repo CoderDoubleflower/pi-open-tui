@@ -16,12 +16,23 @@ export interface FooterSegments {
 	cost: boolean;
 }
 
+export interface TelemetryConfig {
+	enabled: boolean;
+	tps: boolean;
+	ttft: boolean;
+	duration: boolean;
+	tokens: boolean;
+	stalls: boolean;
+	cost: boolean;
+}
+
 export interface OpenTuiConfig {
 	enabled: boolean;
 	icons: {
 		mode: IconMode;
 	};
 	footerSegments: FooterSegments;
+	telemetry: TelemetryConfig;
 }
 
 export const DEFAULT_CONFIG: OpenTuiConfig = {
@@ -37,6 +48,15 @@ export const DEFAULT_CONFIG: OpenTuiConfig = {
 		runtime: true,
 		context: true,
 		tokens: true,
+		cost: true,
+	},
+	telemetry: {
+		enabled: true,
+		tps: true,
+		ttft: true,
+		duration: true,
+		tokens: true,
+		stalls: true,
 		cost: true,
 	},
 };
