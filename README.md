@@ -68,7 +68,7 @@ Run `/open-tui` to open the interactive settings UI. Configuration is stored at 
 After each complete agent run, open-tui shows one transient notification. Tool-call turns are aggregated into that single result:
 
 ```text
-> TPS 42.5 tok/s | ~ TTFT 1.2s | + 29.7s | ↓ in 567 | ↑ out 1.2k | ! stall 1x / 4.3s | $ $3.60/M
+> TPS 42.5 tok/s | ~ TTFT 1.2s | + 29.7s | ↑ 567 | ↓ 1.2k | ! stall 1x / 4.3s | $ $3.60/M
 ```
 
 The notification uses the footer's icon mode and semantic theme colors. Configure its master switch and individual TPS, TTFT, duration, token, stall, and cost segments from the **Telemetry** tab in `/open-tui`.

@@ -362,8 +362,8 @@ export function formatTurnTelemetry(
 		parts.push(theme.fg("success", `${glyphs.done} ${formatTurnDuration(telemetry.totalMs)}`));
 	}
 	if (config.tokens) {
-		parts.push(theme.fg("accent", `${glyphs.input} in ${fmtTokens(telemetry.inputTokens)}`));
-		parts.push(theme.fg("success", `${glyphs.output} out ${fmtTokens(telemetry.outputTokens)}`));
+		parts.push(theme.fg("accent", `${glyphs.input} ${fmtTokens(telemetry.inputTokens)}`));
+		parts.push(theme.fg("success", `${glyphs.output} ${fmtTokens(telemetry.outputTokens)}`));
 	}
 	if (config.stalls && telemetry.stallMs > 0) {
 		parts.push(theme.fg("warning", `${glyphs.stall} stall ${telemetry.stallCount}x / ${formatTurnDuration(telemetry.stallMs)}`));

@@ -90,7 +90,7 @@ test("tracks reliable TPS, TTFT, tokens, total time, and list-price rate", () =>
 	});
 	assert.equal(
 		formatTurnTelemetry(telemetry!, theme, DEFAULT_CONFIG.telemetry, "ascii"),
-		"> TPS 50.0 tok/s | ~ TTFT 0.2s | + 0.9s | ↓ in 50 | ↑ out 20 | $ $4.00/M",
+		"> TPS 50.0 tok/s | ~ TTFT 0.2s | + 0.9s | ↑ 50 | ↓ 20 | $ $4.00/M",
 	);
 });
 
