@@ -95,3 +95,5 @@ This project builds on the work of several Pi community packages:
 - **[pi-tps](https://github.com/monotykamary/pi-tps)** — the turn timing, stall detection, and conservative TPS measurement approach
 
 The animated logo frames are derived from `pi-claude-code-tui`, which in turn derive from Pi's official install script (`pi.dev/install.sh`). The runtime detection list and git porcelain parsing borrow structure from `pi-zentui`.
+
+Special thanks to the **[LINUX DO](https://linux.do)** community for their support.
