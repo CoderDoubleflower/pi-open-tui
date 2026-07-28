@@ -52,11 +52,6 @@ function update(
 	};
 }
 
-function clock(...times: number[]): () => number {
-	let index = 0;
-	return () => times[Math.min(index++, times.length - 1)]!;
-}
-
 function startTurn(tracker: TurnTelemetryTracker, message: AssistantMessage, turnIndex = 0): void {
 	tracker.handle({ type: "turn_start", turnIndex, timestamp: Date.now() });
 	tracker.handle({ type: "message_start", message });
@@ -67,30 +62,35 @@ function endTurn(tracker: TurnTelemetryTracker, message: AssistantMessage, turnI
 	return tracker.handle({ type: "turn_end", turnIndex, message, toolResults: [] });
 }
 
-test("tracks reliable TPS, TTFT, tokens, total time, and list-price rate", () => {
-	const tracker = new TurnTelemetryTracker(clock(0, 100, 200, 300, 400, 500, 600, 700, 800, 900));
+test("measures output delivery from first output through message end", () => {
+	let now = 0;
+	const tracker = new TurnTelemetryTracker(() => now);
 	const message = makeMessage();
 	startTurn(tracker, message);
-	for (let i = 0; i < 6; i++) tracker.handle(update(message));
+	for (const timestamp of [100, 200]) {
+		now = timestamp;
+		tracker.handle(update(message));
+	}
+	now = 800;
 	const telemetry = endTurn(tracker, message);
 
 	assert.deepEqual(telemetry, {
-		tps: 50,
-		ttftMs: 200,
-		totalMs: 900,
+		tps: 28.6,
+		ttftMs: 100,
+		totalMs: 800,
 		inputTokens: 50,
 		outputTokens: 20,
 		stallMs: 0,
 		stallCount: 0,
 		rateUsdPerMTokens: 4,
-		generationMs: 700,
+		generationMs: 800,
 		totalTokens: 70,
 		costUsd: 0.00028,
-		measurementMs: 400,
+		measurementMs: 700,
 	});
 	assert.equal(
 		formatTurnTelemetry(telemetry!, theme, DEFAULT_CONFIG.telemetry, "ascii"),
-		"> TPS 50.0 tok/s | ~ TTFT 0.2s | + 0.9s | ↑ 50 | ↓ 20 | $ $4.00/M",
+		"> TPS 28.6 tok/s | ~ TTFT 0.1s | + 0.8s | ↑ 50 | ↓ 20 | $ $4.00/M",
 	);
 });
 
@@ -135,31 +135,55 @@ test("uses footer semantics and respects telemetry segment settings", () => {
 	assert.equal(formatTurnTelemetry(telemetry, theme, hidden, "ascii"), "");
 });
 
-test("uses the conservative fallback and rejects burst timing", () => {
-	const fallback = new TurnTelemetryTracker(clock(0, 50, 50.1, 50.15, 50.3, 250, 300));
-	const message = makeMessage();
-	startTurn(fallback, message);
-	fallback.handle(update(message));
-	fallback.handle(update(message));
-	fallback.handle(update(message));
-	assert.equal(endTurn(fallback, message)?.tps, 100);
+test("returns no TPS for incomplete or too-short measurements", () => {
+	const scenarios = [
+		{ name: "no deltas", updates: [], endMs: 800, output: 20 },
+		{ name: "one delta", updates: [100], endMs: 800, output: 20 },
+		{ name: "short sample", updates: [100, 150], endMs: 299, output: 20 },
+		{ name: "zero duration", updates: [100, 100], endMs: 100, output: 20 },
+		{ name: "negative duration", updates: [100, 110], endMs: 90, output: 20 },
+		{ name: "zero output", updates: [100, 200], endMs: 800, output: 0 },
+	];
 
-	const burst = new TurnTelemetryTracker(clock(0, 100, 100.1, 100.1, 100.1, 100.1, 100.1, 100.1, 101, 101));
-	startTurn(burst, message);
-	for (let i = 0; i < 6; i++) burst.handle(update(message));
-	assert.equal(endTurn(burst, message)?.tps, null);
+	for (const scenario of scenarios) {
+		let now = 0;
+		const tracker = new TurnTelemetryTracker(() => now);
+		const message = makeMessage(scenario.output);
+		startTurn(tracker, message);
+		for (const timestamp of scenario.updates) {
+			now = timestamp;
+			tracker.handle(update(message));
+		}
+		now = scenario.endMs;
+		const telemetry = endTurn(tracker, message);
+		assert.equal(telemetry?.tps, null, scenario.name);
+		assert.equal(telemetry?.outputTokens, scenario.output, scenario.name);
+	}
 });
 
-test("groups consecutive stalls and starts a new count after streaming resumes", () => {
-	const tracker = new TurnTelemetryTracker(clock(0, 100, 200, 300, 900, 1500, 1600, 2200, 2300, 2400));
-	const message = makeMessage();
-	startTurn(tracker, message);
-	for (let i = 0; i < 6; i++) tracker.handle(update(message));
-	const telemetry = endTurn(tracker, message)!;
+test("keeps stalls in delivery time so they lower TPS", () => {
+	function measure(updates: number[], endMs: number) {
+		let now = 0;
+		const tracker = new TurnTelemetryTracker(() => now);
+		const message = makeMessage();
+		startTurn(tracker, message);
+		for (const timestamp of updates) {
+			now = timestamp;
+			tracker.handle(update(message));
+		}
+		now = endMs;
+		return endTurn(tracker, message)!;
+	}
 
-	assert.equal(telemetry.stallMs, 1800);
-	assert.equal(telemetry.stallCount, 2);
-	assert.match(formatTurnTelemetry(telemetry, theme, DEFAULT_CONFIG.telemetry, "ascii"), /! stall 2x \/ 1\.8s/);
+	const uninterrupted = measure([100, 200, 300], 800);
+	const stalled = measure([100, 1200, 2300, 2400, 3500], 3600);
+
+	assert.equal(uninterrupted.tps, 28.6);
+	assert.equal(stalled.tps, 5.7);
+	assert.ok(stalled.tps! < uninterrupted.tps!);
+	assert.equal(stalled.stallMs, 3300);
+	assert.equal(stalled.stallCount, 2);
+	assert.match(formatTurnTelemetry(stalled, theme, DEFAULT_CONFIG.telemetry, "ascii"), /! stall 2x \/ 3\.3s/);
 });
 
 test("only meaningful stream deltas define TTFT and stalls", () => {
@@ -188,104 +212,132 @@ test("only meaningful stream deltas define TTFT and stalls", () => {
 	assert.equal(telemetry.stallCount, 0);
 });
 
-test("excludes tool gaps between assistant messages from primary TPS", () => {
-	const tracker = new TurnTelemetryTracker(clock(
-		0,
-		100, 200, 300, 400, 500, 600,
-		1600, 1700, 1800, 1900, 2000, 2100,
-		2200,
-	));
-	const first = makeMessage(20, 10);
-	const second = makeMessage(20, 10);
+test("is stable across chunk counts", () => {
+	function measure(updateTimes: number[]) {
+		let now = 0;
+		const tracker = new TurnTelemetryTracker(() => now);
+		const message = makeMessage();
+		startTurn(tracker, message);
+		for (const timestamp of updateTimes) {
+			now = timestamp;
+			tracker.handle(update(message));
+		}
+		now = 800;
+		return endTurn(tracker, message)!;
+	}
 
-	startTurn(tracker, first);
-	for (let i = 0; i < 4; i++) tracker.handle(update(first));
-	tracker.handle({ type: "message_end", message: first });
-	tracker.handle({ type: "tool_execution_start", toolCallId: "call-1", toolName: "read", args: {} });
-	tracker.handle({ type: "message_start", message: second });
-	for (let i = 0; i < 4; i++) tracker.handle(update(second));
-	const telemetry = endTurn(tracker, second)!;
-
-	assert.equal(telemetry.tps, 100);
-	assert.equal(telemetry.outputTokens, 40);
-	assert.equal(telemetry.stallMs, 0);
+	assert.equal(measure([100, 700]).tps, 28.6);
+	assert.equal(measure([100, 200, 300, 400, 500, 700]).tps, 28.6);
 });
 
-test("clamps fallback tool-call TPS to the model's reliable observed speed", () => {
-	const tracker = new TurnTelemetryTracker(clock(
-		0, 100, 200, 300, 400, 500, 600, 700, 800, 900,
-		1000, 1100, 1100.1, 1100.15, 1100.3, 1300, 1300,
-	));
-	const message = makeMessage();
-
+test("does not cap a valid high delivery rate", () => {
+	let now = 0;
+	const tracker = new TurnTelemetryTracker(() => now);
+	const message = makeMessage(3_000);
 	startTurn(tracker, message);
-	for (let i = 0; i < 6; i++) tracker.handle(update(message));
-	assert.equal(endTurn(tracker, message)?.tps, 50);
+	now = 100;
+	tracker.handle(update(message));
+	now = 200;
+	tracker.handle(update(message));
+	now = 300;
 
-	startTurn(tracker, message, 1);
-	tracker.handle(update(message));
-	tracker.handle(update(message));
-	tracker.handle(update(message));
-	tracker.handle({ type: "tool_execution_start", toolCallId: "call-2", toolName: "bash", args: {} });
-	assert.equal(endTurn(tracker, message, 1)?.tps, 50);
+	assert.equal(endTurn(tracker, message)?.tps, 15_000);
 });
 
-test("aggregates every turn into one complete agent-run result", () => {
-	const tracker = new TurnTelemetryTracker(clock(
-		0, 100, 200, 300, 400, 500, 600, 700, 800, 900,
-		1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 2000,
-	));
+test("excludes tool gaps between assistant messages", () => {
+	function measure(toolGapMs: number) {
+		let now = 0;
+		const tracker = new TurnTelemetryTracker(() => now);
+		const first = makeMessage(20, 10);
+		const second = makeMessage(20, 10);
+
+		startTurn(tracker, first);
+		for (const timestamp of [100, 200]) {
+			now = timestamp;
+			tracker.handle(update(first));
+		}
+		now = 400;
+		tracker.handle({ type: "message_end", message: first });
+		tracker.handle({ type: "tool_execution_start", toolCallId: "call-1", toolName: "read", args: {} });
+		now += toolGapMs;
+		tracker.handle({ type: "message_start", message: second });
+		for (const offset of [100, 200]) {
+			now = 400 + toolGapMs + offset;
+			tracker.handle(update(second));
+		}
+		now = 800 + toolGapMs;
+		return endTurn(tracker, second)!;
+	}
+
+	assert.equal(measure(0).tps, 66.7);
+	assert.equal(measure(10_000).tps, 66.7);
+});
+
+test("pairs tokens and delivery time for each measurable message", () => {
+	let now = 0;
+	const tracker = new TurnTelemetryTracker(() => now);
+	const short = makeMessage(5, 20);
+	const measured = makeMessage(20, 50);
+
+	startTurn(tracker, short);
+	now = 100;
+	tracker.handle(update(short));
+	now = 150;
+	tracker.handle({ type: "message_end", message: short });
+	tracker.handle({ type: "message_start", message: measured });
+	for (const timestamp of [200, 300]) {
+		now = timestamp;
+		tracker.handle(update(measured));
+	}
+	now = 700;
+	const telemetry = endTurn(tracker, measured)!;
+
+	assert.equal(telemetry.tps, 40);
+	assert.equal(telemetry.measurementMs, 500);
+	assert.equal(telemetry.inputTokens, 70);
+	assert.equal(telemetry.outputTokens, 25);
+});
+
+test("aggregates only measured tokens across an agent run", () => {
+	let now = 0;
+	const tracker = new TurnTelemetryTracker(() => now);
+	const short = makeMessage(5, 20);
 	const first = makeMessage(20, 50);
 	const second = makeMessage(30, 100);
 
 	tracker.handle({ type: "agent_start" });
-	startTurn(tracker, first);
-	for (let i = 0; i < 6; i++) tracker.handle(update(first));
-	endTurn(tracker, first);
-	tracker.handle({ type: "agent_start" });
-	startTurn(tracker, second, 1);
-	for (let i = 0; i < 6; i++) tracker.handle(update(second));
-	endTurn(tracker, second, 1);
-	const telemetry = tracker.handle({ type: "agent_settled" });
-
-	assert.equal(telemetry?.tps, 62.5);
-	assert.equal(telemetry?.ttftMs, 200);
-	assert.equal(telemetry?.totalMs, 2000);
-	assert.equal(telemetry?.inputTokens, 150);
-	assert.equal(telemetry?.outputTokens, 50);
-	assert.equal(telemetry?.totalTokens, 200);
-	assert.equal(telemetry?.rateUsdPerMTokens, 4);
-});
-
-test("aggregates TPS from measurable turns when a tool turn is not measurable", () => {
-	let now = 0;
-	const tracker = new TurnTelemetryTracker(() => now);
-	const toolTurn = makeMessage(5, 20);
-	const finalTurn = makeMessage(20, 50);
-
-	tracker.handle({ type: "agent_start" });
-	startTurn(tracker, toolTurn);
+	startTurn(tracker, short);
 	now = 100;
-	tracker.handle(update(toolTurn));
-	tracker.handle({ type: "tool_execution_start", toolCallId: "call-1", toolName: "read", args: {} });
+	tracker.handle(update(short));
 	now = 150;
-	endTurn(tracker, toolTurn);
+	endTurn(tracker, short);
 
 	now = 200;
-	startTurn(tracker, finalTurn, 1);
-	for (const timestamp of [300, 400, 500, 600, 700, 800]) {
+	startTurn(tracker, first, 1);
+	for (const timestamp of [300, 400]) {
 		now = timestamp;
-		tracker.handle(update(finalTurn));
+		tracker.handle(update(first));
 	}
+	now = 800;
+	endTurn(tracker, first, 1);
+
 	now = 900;
-	endTurn(tracker, finalTurn, 1);
-	now = 1_000;
+	startTurn(tracker, second, 2);
+	for (const timestamp of [1_000, 1_100]) {
+		now = timestamp;
+		tracker.handle(update(second));
+	}
+	now = 1_600;
+	endTurn(tracker, second, 2);
+	now = 1_700;
 	const telemetry = tracker.handle({ type: "agent_settled" })!;
 
-	assert.equal(telemetry.tps, 50);
-	assert.equal(telemetry.measurementMs, 400);
-	assert.equal(telemetry.inputTokens, 70);
-	assert.equal(telemetry.outputTokens, 25);
+	assert.equal(telemetry.tps, 45.5);
+	assert.equal(telemetry.measurementMs, 1_100);
+	assert.equal(telemetry.inputTokens, 170);
+	assert.equal(telemetry.outputTokens, 55);
+	assert.equal(telemetry.totalTokens, 225);
+	assert.equal(telemetry.rateUsdPerMTokens, 4);
 });
 
 test("open-tui notifies once after a complete agent run", () => {

@@ -144,16 +144,22 @@ class SettingsUi implements SettingsUiHandle {
 	private selectList: SelectList;
 	private readonly selectedItemByTab: Partial<Record<Tab, string>> = {};
 	private readonly container: Box;
+	private readonly theme: Theme;
+	private readonly onChange: (config: OpenTuiConfig) => void;
+	private readonly onClose: () => void;
 	private cachedWidth: number | undefined;
 	private cachedLines: string[] | undefined;
 
 	constructor(
-		private readonly theme: Theme,
+		theme: Theme,
 		config: OpenTuiConfig,
-		private readonly onChange: (config: OpenTuiConfig) => void,
-		private readonly onClose: () => void,
+		onChange: (config: OpenTuiConfig) => void,
+		onClose: () => void,
 	) {
+		this.theme = theme;
 		this.config = config;
+		this.onChange = onChange;
+		this.onClose = onClose;
 		this.container = new Box(1, 1, (s: string) => theme.bg("customMessageBg", s));
 		this.selectList = new SelectList([], 12, {
 			selectedPrefix: (t) => theme.fg("accent", t),

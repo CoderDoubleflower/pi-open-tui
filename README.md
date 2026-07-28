@@ -73,7 +73,7 @@ After each complete agent run, open-tui shows one transient notification. Tool-c
 
 The notification uses the footer's icon mode and semantic theme colors. Configure its master switch and individual TPS, TTFT, duration, token, stall, and cost segments from the **Telemetry** tab in `/open-tui`.
 
-TPS excludes time-to-first-token, detected stalls, and tool execution between messages. In a multi-turn agent run, it is weighted from the turns with measurable streaming spans; an unmeasurable tool turn no longer hides a measurable final response. A rate that cannot be identified reliably is shown as `TPS —`. The `stall` segment shows occurrence count followed by accumulated duration. The optional `$ / M` value uses the model's list-price `usage.cost.total`; it is not the session's cumulative cost shown in the footer.
+TPS is the actual output delivery rate: provider-reported output tokens divided by the time from the first meaningful output delta through `message_end`. It excludes time-to-first-token and tool execution between assistant messages, but includes stalls during streaming. Multi-message and multi-turn runs sum only measurable token-duration pairs before calculating the rate, so an unmeasurable short tool response does not pollute or hide a measurable final response. Messages with fewer than two meaningful deltas or less than 200 ms of observed delivery time are shown as `TPS —` unless another measurable message exists in the run. The `stall` segment shows occurrence count followed by accumulated duration. The optional `$ / M` value uses the model's list-price `usage.cost.total`; it is not the session's cumulative cost shown in the footer.
 
 ## Local development
 
