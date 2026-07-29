@@ -14,8 +14,6 @@ import { resolveGlyphs } from "./icons.ts";
 import { fmtTokens, formatDuration } from "./utils.ts";
 
 const STALL_THRESHOLD_MS = 1000;
-const MIN_STREAM_UPDATES = 2;
-const MIN_MEASUREMENT_MS = 200;
 
 type TelemetryEvent =
 	| AgentStartEvent
@@ -30,16 +28,9 @@ type AgentMessage = MessageStartEvent["message"];
 type AssistantMessage = Extract<AgentMessage, { role: "assistant" }>;
 
 interface MessageTiming {
-	startMs: number;
 	lastUpdateMs: number;
 	firstOutputMs: number | null;
-	streamUpdateCount: number;
 	inStall: boolean;
-}
-
-interface MessageMeasurement {
-	outputTokens: number;
-	durationMs: number;
 }
 
 interface TurnTiming {
@@ -47,7 +38,6 @@ interface TurnTiming {
 	firstTokenMs: number | null;
 	currentMessage: MessageTiming | null;
 	messages: AssistantMessage[];
-	measurements: MessageMeasurement[];
 	generationMs: number;
 	stallMs: number;
 	stallCount: number;
@@ -68,11 +58,6 @@ export interface TurnTelemetry {
 	measurementMs: number | null;
 }
 
-interface MeasuredTurn {
-	telemetry: TurnTelemetry;
-	measuredOutputTokens: number;
-}
-
 function isAssistantMessage(message: AgentMessage): message is AssistantMessage {
 	return message.role === "assistant";
 }
@@ -86,7 +71,7 @@ export class TurnTelemetryTracker {
 	private readonly now: () => number;
 	private turn: TurnTiming | undefined;
 	private agentStartMs: number | null = null;
-	private agentTurns: MeasuredTurn[] = [];
+	private agentTurns: TurnTelemetry[] = [];
 
 	constructor(now: () => number = () => performance.now()) {
 		this.now = now;
@@ -127,7 +112,6 @@ export class TurnTelemetryTracker {
 			firstTokenMs: null,
 			currentMessage: null,
 			messages: [],
-			measurements: [],
 			generationMs: 0,
 			stallMs: 0,
 			stallCount: 0,
@@ -138,10 +122,8 @@ export class TurnTelemetryTracker {
 		if (!this.turn || !isAssistantMessage(message)) return;
 		const now = this.now();
 		this.turn.currentMessage = {
-			startMs: now,
 			lastUpdateMs: now,
 			firstOutputMs: null,
-			streamUpdateCount: 0,
 			inStall: false,
 		};
 	}
@@ -163,12 +145,9 @@ export class TurnTelemetryTracker {
 		if (current.firstOutputMs === null) {
 			current.firstOutputMs = now;
 			turn.firstTokenMs ??= now;
-			current.streamUpdateCount = 1;
 			current.lastUpdateMs = now;
 			return;
 		}
-
-		current.streamUpdateCount++;
 
 		const gap = now - current.lastUpdateMs;
 		if (gap >= STALL_THRESHOLD_MS) {
@@ -188,17 +167,9 @@ export class TurnTelemetryTracker {
 		const current = turn.currentMessage;
 		if (current) {
 			const endMs = this.now();
-			turn.generationMs += endMs - current.startMs;
+			turn.generationMs = endMs - turn.startMs;
 			if (current.firstOutputMs === null && message.usage.output > 0) {
 				turn.firstTokenMs ??= endMs;
-			}
-			const measurementMs = current.firstOutputMs === null ? 0 : endMs - current.firstOutputMs;
-			if (
-				message.usage.output > 0 &&
-				current.streamUpdateCount >= MIN_STREAM_UPDATES &&
-				measurementMs >= MIN_MEASUREMENT_MS
-			) {
-				turn.measurements.push({ outputTokens: message.usage.output, durationMs: measurementMs });
 			}
 			turn.currentMessage = null;
 		}
@@ -206,12 +177,12 @@ export class TurnTelemetryTracker {
 	}
 
 	private endTurnAndCollect(): TurnTelemetry | undefined {
-		const result = this.endTurn();
-		if (result && this.agentStartMs !== null) this.agentTurns.push(result);
-		return result?.telemetry;
+		const telemetry = this.endTurn();
+		if (telemetry && this.agentStartMs !== null) this.agentTurns.push(telemetry);
+		return telemetry;
 	}
 
-	private endTurn(): MeasuredTurn | undefined {
+	private endTurn(): TurnTelemetry | undefined {
 		const turn = this.turn;
 		this.turn = undefined;
 		if (!turn || turn.firstTokenMs === null || turn.messages.length === 0) return;
@@ -231,32 +202,27 @@ export class TurnTelemetryTracker {
 			throw new Error("Invalid assistant usage in turn telemetry");
 		}
 
-		const measuredOutputTokens = turn.measurements.reduce((sum, measurement) => sum + measurement.outputTokens, 0);
-		const measuredMs = turn.measurements.reduce((sum, measurement) => sum + measurement.durationMs, 0);
-		const measurementMs = measuredMs > 0 ? measuredMs : null;
+		const measurementMs = outputTokens > 0 && turn.generationMs > 0 ? turn.generationMs : null;
 		const tps = measurementMs === null
 			? null
-			: round(measuredOutputTokens / (measurementMs / 1000), 1);
+			: round(outputTokens / (measurementMs / 1000), 1);
 		const validCost = Number.isFinite(costUsd) && costUsd > 0;
 		const validTokens = Number.isFinite(totalTokens) && totalTokens > 0;
 		return {
-			telemetry: {
-				tps,
-				ttftMs: turn.firstTokenMs - turn.startMs,
-				totalMs: endMs - turn.startMs,
-				inputTokens,
-				outputTokens,
-				stallMs: turn.stallMs,
-				stallCount: turn.stallCount,
-				rateUsdPerMTokens: validCost && validTokens
-					? round(costUsd / (totalTokens / 1_000_000), 2)
-					: null,
-				generationMs: turn.generationMs,
-				totalTokens,
-				costUsd: validCost ? costUsd : 0,
-				measurementMs,
-			},
-			measuredOutputTokens,
+			tps,
+			ttftMs: turn.firstTokenMs - turn.startMs,
+			totalMs: endMs - turn.startMs,
+			inputTokens,
+			outputTokens,
+			stallMs: turn.stallMs,
+			stallCount: turn.stallCount,
+			rateUsdPerMTokens: validCost && validTokens
+				? round(costUsd / (totalTokens / 1_000_000), 2)
+				: null,
+			generationMs: turn.generationMs,
+			totalTokens,
+			costUsd: validCost ? costUsd : 0,
+			measurementMs,
 		};
 	}
 
@@ -267,29 +233,28 @@ export class TurnTelemetryTracker {
 		this.agentTurns = [];
 		if (startMs === null || turns.length === 0) return;
 
-		const outputTokens = turns.reduce((sum, turn) => sum + turn.telemetry.outputTokens, 0);
-		const inputTokens = turns.reduce((sum, turn) => sum + turn.telemetry.inputTokens, 0);
-		const totalTokens = turns.reduce((sum, turn) => sum + turn.telemetry.totalTokens, 0);
-		const costUsd = turns.reduce((sum, turn) => sum + turn.telemetry.costUsd, 0);
-		const stallMs = turns.reduce((sum, turn) => sum + turn.telemetry.stallMs, 0);
-		const stallCount = turns.reduce((sum, turn) => sum + turn.telemetry.stallCount, 0);
-		const measuredOutputTokens = turns.reduce((sum, turn) => sum + turn.measuredOutputTokens, 0);
-		const measuredMs = turns.reduce((sum, turn) => sum + (turn.telemetry.measurementMs ?? 0), 0);
-		const measurementMs = measuredMs > 0 ? measuredMs : null;
+		const outputTokens = turns.reduce((sum, turn) => sum + turn.outputTokens, 0);
+		const inputTokens = turns.reduce((sum, turn) => sum + turn.inputTokens, 0);
+		const totalTokens = turns.reduce((sum, turn) => sum + turn.totalTokens, 0);
+		const costUsd = turns.reduce((sum, turn) => sum + turn.costUsd, 0);
+		const stallMs = turns.reduce((sum, turn) => sum + turn.stallMs, 0);
+		const stallCount = turns.reduce((sum, turn) => sum + turn.stallCount, 0);
+		const generationMs = turns.reduce((sum, turn) => sum + turn.generationMs, 0);
+		const measurementMs = outputTokens > 0 && generationMs > 0 ? generationMs : null;
 		const tps = measurementMs === null
 			? null
-			: round(measuredOutputTokens / (measurementMs / 1000), 1);
+			: round(outputTokens / (measurementMs / 1000), 1);
 		const validRate = costUsd > 0 && totalTokens > 0;
 		return {
 			tps,
-			ttftMs: turns[0]!.telemetry.ttftMs,
+			ttftMs: turns[0]!.ttftMs,
 			totalMs: this.now() - startMs,
 			inputTokens,
 			outputTokens,
 			stallMs,
 			stallCount,
 			rateUsdPerMTokens: validRate ? round(costUsd / (totalTokens / 1_000_000), 2) : null,
-			generationMs: turns.reduce((sum, turn) => sum + turn.telemetry.generationMs, 0),
+			generationMs,
 			totalTokens,
 			costUsd,
 			measurementMs,
