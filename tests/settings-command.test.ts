@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
-import type { Component, KeybindingsManager, TUI } from "@earendil-works/pi-tui";
-import { DEFAULT_CONFIG, type OpenTuiConfig } from "../extensions/open-tui/config.ts";
+import { visibleWidth, type Component, type KeybindingsManager, type TUI } from "@earendil-works/pi-tui";
+import { DEFAULT_CONFIG, loadConfig, type OpenTuiConfig } from "../extensions/open-tui/config.ts";
 import { registerSettingsCommand } from "../extensions/open-tui/settings-command.ts";
 
 interface SettingsComponent extends Component {
@@ -15,13 +18,15 @@ const theme = {
 	bold: (text: string) => text,
 } as Theme;
 
-async function openSettings(): Promise<{
+async function openSettings(initialConfig = structuredClone(DEFAULT_CONFIG)): Promise<{
 	component: SettingsComponent;
 	getConfig: () => OpenTuiConfig;
+	isClosed: () => boolean;
 }> {
 	let commandHandler: ((args: string, ctx: ExtensionContext) => Promise<void> | void) | undefined;
 	let component: SettingsComponent | undefined;
-	let config = structuredClone(DEFAULT_CONFIG);
+	let config = initialConfig;
+	let closed = false;
 
 	const pi = {
 		registerCommand: (_name: string, options: { handler: typeof commandHandler }) => {
@@ -49,7 +54,9 @@ async function openSettings(): Promise<{
 					done: (value: void) => void,
 				) => Component,
 			) => {
-				component = factory(tui, theme, {} as KeybindingsManager, (_value: void) => {}) as SettingsComponent;
+				component = factory(tui, theme, {} as KeybindingsManager, (_value: void) => {
+					closed = true;
+				}) as SettingsComponent;
 			},
 		},
 	} as unknown as ExtensionContext;
@@ -58,11 +65,11 @@ async function openSettings(): Promise<{
 	await commandHandler("", ctx);
 	assert.ok(component);
 
-	return { component, getConfig: () => config };
+	return { component, getConfig: () => config, isClosed: () => closed };
 }
 
 function selectedLine(component: SettingsComponent): string {
-	return component.render(80).find((line) => line.includes("→")) ?? "";
+	return component.render(80).find((line) => line.includes("→ ")) ?? "";
 }
 
 test("keeps the changed setting selected", async () => {
@@ -71,11 +78,11 @@ test("keeps the changed setting selected", async () => {
 	settings.component.handleInput("\t");
 	settings.component.handleInput("\t");
 	settings.component.handleInput("\x1b[B");
-	assert.match(selectedLine(settings.component), /git branch/);
+	assert.match(selectedLine(settings.component), /Git branch/);
 
 	settings.component.handleInput("\r");
 	assert.equal(settings.getConfig().footerSegments.gitBranch, false);
-	assert.match(selectedLine(settings.component), /git branch/);
+	assert.match(selectedLine(settings.component), /Git branch/);
 });
 
 test("remembers the selection for each tab", async () => {
@@ -89,7 +96,7 @@ test("remembers the selection for each tab", async () => {
 	settings.component.handleInput("\t");
 	settings.component.handleInput("\t");
 
-	assert.match(selectedLine(settings.component), /git branch/);
+	assert.match(selectedLine(settings.component), /Git branch/);
 });
 
 test("configures telemetry from its own tab", async () => {
@@ -105,4 +112,68 @@ test("configures telemetry from its own tab", async () => {
 	settings.component.handleInput("\x1b[B");
 	settings.component.handleInput("\r");
 	assert.equal(settings.getConfig().telemetry.tps, false);
+});
+
+test("supports localized settings and keyboard shortcuts", async () => {
+	const settings = await openSettings();
+	assert.match(settings.component.render(80).join("\n"), /Open TUI Settings.*General.*Language/s);
+
+	settings.component.handleInput("\x1b[B");
+	settings.component.handleInput(" ");
+	assert.equal(settings.getConfig().settingsLanguage, "zh");
+	assert.match(settings.component.render(80).join("\n"), /Open TUI 设置.*常规.*语言.*简体中文/s);
+	assert.match(selectedLine(settings.component), /语言/);
+
+	const reopened = await openSettings(structuredClone(settings.getConfig()));
+	assert.match(reopened.component.render(80).join("\n"), /Open TUI 设置.*简体中文/s);
+
+	reopened.component.handleInput("\x1b[B");
+	reopened.component.handleInput("\x1b[C");
+	assert.match(reopened.component.render(80).join("\n"), /\[图标\]/);
+	reopened.component.handleInput("\x1b[D");
+	assert.match(selectedLine(reopened.component), /语言/);
+	reopened.component.handleInput("q");
+	assert.equal(reopened.isClosed(), true);
+});
+
+test("configures the extension status line with Space", async () => {
+	const settings = await openSettings();
+	settings.component.handleInput("\x1b[C");
+	settings.component.handleInput("\x1b[C");
+	for (let i = 0; i < 8; i++) settings.component.handleInput("\x1b[B");
+	assert.match(selectedLine(settings.component), /Extension status line/);
+
+	settings.component.handleInput(" ");
+	assert.equal(settings.getConfig().footerSegments.extensionStatuses, false);
+	assert.match(selectedLine(settings.component), /Extension status line/);
+});
+
+test("keeps localized settings and values within narrow widths", async () => {
+	const config = structuredClone(DEFAULT_CONFIG);
+	config.settingsLanguage = "zh";
+	const settings = await openSettings(config);
+
+	for (const width of [24, 36, 48]) {
+		const lines = settings.component.render(width);
+		for (const line of lines) {
+			assert.ok(visibleWidth(line) <= width, `${visibleWidth(line)} > ${width}: ${line}`);
+		}
+		const output = lines.join("\n");
+		assert.match(output, /开启/);
+		assert.match(output, /简体中文/);
+	}
+});
+
+test("falls back to English for an invalid settings language", () => {
+	const agentDir = mkdtempSync(join(tmpdir(), "pi-open-tui-"));
+	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	try {
+		process.env.PI_CODING_AGENT_DIR = agentDir;
+		writeFileSync(join(agentDir, "open-tui.json"), JSON.stringify({ settingsLanguage: "de" }), "utf8");
+		assert.equal(loadConfig().settingsLanguage, "en");
+	} finally {
+		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+		rmSync(agentDir, { recursive: true, force: true });
+	}
 });

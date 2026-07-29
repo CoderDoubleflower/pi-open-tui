@@ -8,23 +8,80 @@ import {
 	type TUI,
 	Text,
 } from "@earendil-works/pi-tui";
-import type { IconMode, OpenTuiConfig } from "./config.ts";
+import type { IconMode, OpenTuiConfig, SettingsLanguage } from "./config.ts";
 
 interface SettingItem {
 	id: string;
 	label: string;
 	currentValue: string;
-	values: string[];
 }
 
 type Tab = "features" | "icons" | "segments" | "telemetry";
 
-const TABS: { id: Tab; label: string }[] = [
-	{ id: "features", label: "Features" },
-	{ id: "icons", label: "Icons" },
-	{ id: "segments", label: "Segments" },
-	{ id: "telemetry", label: "Telemetry" },
-];
+const TABS: Tab[] = ["features", "icons", "segments", "telemetry"];
+
+const COPY = {
+	en: {
+		title: "Open TUI Settings",
+		tabs: { features: "General", icons: "Icons", segments: "Footer", telemetry: "Telemetry" },
+		hint: "Tab/Shift+Tab/←/→: tabs · ↑/↓: move · Enter/Space: change · Esc/q: close",
+		labels: {
+			enabled: "Enabled",
+			language: "Language",
+			iconMode: "Icon mode",
+			cwd: "CWD",
+			gitBranch: "Git branch",
+			gitStatus: "Git status",
+			gitCommit: "Git commit (detached)",
+			runtime: "Runtime",
+			context: "Context bar",
+			tokens: "Tokens",
+			cost: "Cost",
+			extensionStatuses: "Extension status line",
+			totalDuration: "Total duration",
+			tokenCounts: "Token counts",
+			stallDetails: "Stall details",
+			costRate: "Cost rate",
+		},
+		values: {
+			on: "On",
+			off: "Off",
+			languages: { en: "English", zh: "简体中文" },
+			icons: { auto: "Auto", nerd: "Nerd", ascii: "ASCII" },
+		},
+	},
+	zh: {
+		title: "Open TUI 设置",
+		tabs: { features: "常规", icons: "图标", segments: "Footer", telemetry: "遥测" },
+		hint: "Tab/Shift+Tab/←/→：切页 · ↑/↓：移动 · Enter/Space：更改 · Esc/q：关闭",
+		labels: {
+			enabled: "启用",
+			language: "语言",
+			iconMode: "图标模式",
+			cwd: "当前目录",
+			gitBranch: "Git 分支",
+			gitStatus: "Git 状态",
+			gitCommit: "Git 提交（分离 HEAD）",
+			runtime: "运行环境",
+			context: "上下文栏",
+			tokens: "Token",
+			cost: "费用",
+			extensionStatuses: "扩展状态行",
+			totalDuration: "总耗时",
+			tokenCounts: "Token 数量",
+			stallDetails: "停顿详情",
+			costRate: "费用速率",
+		},
+		values: {
+			on: "开启",
+			off: "关闭",
+			languages: { en: "English", zh: "简体中文" },
+			icons: { auto: "自动", nerd: "Nerd", ascii: "ASCII" },
+		},
+	},
+} as const;
+
+type SettingsCopy = (typeof COPY)[SettingsLanguage];
 
 function toggleSetting(config: OpenTuiConfig, key: keyof OpenTuiConfig["footerSegments"]): OpenTuiConfig {
 	return {
@@ -47,6 +104,10 @@ function toggleEnabled(config: OpenTuiConfig): OpenTuiConfig {
 	return { ...config, enabled: !config.enabled };
 }
 
+function toggleLanguage(config: OpenTuiConfig): OpenTuiConfig {
+	return { ...config, settingsLanguage: config.settingsLanguage === "en" ? "zh" : "en" };
+}
+
 function toggleTelemetry(config: OpenTuiConfig, key: keyof OpenTuiConfig["telemetry"]): OpenTuiConfig {
 	return {
 		...config,
@@ -54,61 +115,54 @@ function toggleTelemetry(config: OpenTuiConfig, key: keyof OpenTuiConfig["teleme
 	};
 }
 
-function buildFeaturesItems(config: OpenTuiConfig): SettingItem[] {
+function buildFeaturesItems(config: OpenTuiConfig, copy: SettingsCopy): SettingItem[] {
 	return [
-		{
-			id: "enabled",
-			label: "Enabled",
-			currentValue: config.enabled ? "on" : "off",
-			values: ["on", "off"],
-		},
+		{ id: "enabled", label: copy.labels.enabled, currentValue: config.enabled ? copy.values.on : copy.values.off },
+		{ id: "settingsLanguage", label: copy.labels.language, currentValue: copy.values.languages[config.settingsLanguage] },
 	];
 }
 
-function buildIconsItems(config: OpenTuiConfig): SettingItem[] {
-	return [
-		{
-			id: "mode",
-			label: "Icon mode",
-			currentValue: config.icons.mode,
-			values: ["auto", "nerd", "ascii"],
-		},
-	];
+function buildIconsItems(config: OpenTuiConfig, copy: SettingsCopy): SettingItem[] {
+	return [{ id: "mode", label: copy.labels.iconMode, currentValue: copy.values.icons[config.icons.mode] }];
 }
 
-function buildSegmentsItems(config: OpenTuiConfig): SettingItem[] {
+function buildSegmentsItems(config: OpenTuiConfig, copy: SettingsCopy): SettingItem[] {
 	const segs = config.footerSegments;
+	const flag = (value: boolean) => value ? copy.values.on : copy.values.off;
 	return [
-		{ id: "cwd", label: "cwd", currentValue: segs.cwd ? "on" : "off", values: ["on", "off"] },
-		{ id: "gitBranch", label: "git branch", currentValue: segs.gitBranch ? "on" : "off", values: ["on", "off"] },
-		{ id: "gitStatus", label: "git status", currentValue: segs.gitStatus ? "on" : "off", values: ["on", "off"] },
-		{ id: "gitCommit", label: "git commit (detached)", currentValue: segs.gitCommit ? "on" : "off", values: ["on", "off"] },
-		{ id: "runtime", label: "runtime", currentValue: segs.runtime ? "on" : "off", values: ["on", "off"] },
-		{ id: "context", label: "context bar", currentValue: segs.context ? "on" : "off", values: ["on", "off"] },
-		{ id: "tokens", label: "tokens", currentValue: segs.tokens ? "on" : "off", values: ["on", "off"] },
-		{ id: "cost", label: "cost", currentValue: segs.cost ? "on" : "off", values: ["on", "off"] },
+		{ id: "cwd", label: copy.labels.cwd, currentValue: flag(segs.cwd) },
+		{ id: "gitBranch", label: copy.labels.gitBranch, currentValue: flag(segs.gitBranch) },
+		{ id: "gitStatus", label: copy.labels.gitStatus, currentValue: flag(segs.gitStatus) },
+		{ id: "gitCommit", label: copy.labels.gitCommit, currentValue: flag(segs.gitCommit) },
+		{ id: "runtime", label: copy.labels.runtime, currentValue: flag(segs.runtime) },
+		{ id: "context", label: copy.labels.context, currentValue: flag(segs.context) },
+		{ id: "tokens", label: copy.labels.tokens, currentValue: flag(segs.tokens) },
+		{ id: "cost", label: copy.labels.cost, currentValue: flag(segs.cost) },
+		{ id: "extensionStatuses", label: copy.labels.extensionStatuses, currentValue: flag(segs.extensionStatuses) },
 	];
 }
 
-function buildTelemetryItems(config: OpenTuiConfig): SettingItem[] {
+function buildTelemetryItems(config: OpenTuiConfig, copy: SettingsCopy): SettingItem[] {
 	const telemetry = config.telemetry;
+	const flag = (value: boolean) => value ? copy.values.on : copy.values.off;
 	return [
-		{ id: "enabled", label: "Enabled", currentValue: telemetry.enabled ? "on" : "off", values: ["on", "off"] },
-		{ id: "tps", label: "TPS", currentValue: telemetry.tps ? "on" : "off", values: ["on", "off"] },
-		{ id: "ttft", label: "TTFT", currentValue: telemetry.ttft ? "on" : "off", values: ["on", "off"] },
-		{ id: "duration", label: "total duration", currentValue: telemetry.duration ? "on" : "off", values: ["on", "off"] },
-		{ id: "tokens", label: "token counts", currentValue: telemetry.tokens ? "on" : "off", values: ["on", "off"] },
-		{ id: "stalls", label: "stall details", currentValue: telemetry.stalls ? "on" : "off", values: ["on", "off"] },
-		{ id: "cost", label: "cost rate", currentValue: telemetry.cost ? "on" : "off", values: ["on", "off"] },
+		{ id: "enabled", label: copy.labels.enabled, currentValue: flag(telemetry.enabled) },
+		{ id: "tps", label: "TPS", currentValue: flag(telemetry.tps) },
+		{ id: "ttft", label: "TTFT", currentValue: flag(telemetry.ttft) },
+		{ id: "duration", label: copy.labels.totalDuration, currentValue: flag(telemetry.duration) },
+		{ id: "tokens", label: copy.labels.tokenCounts, currentValue: flag(telemetry.tokens) },
+		{ id: "stalls", label: copy.labels.stallDetails, currentValue: flag(telemetry.stalls) },
+		{ id: "cost", label: copy.labels.costRate, currentValue: flag(telemetry.cost) },
 	];
 }
 
 function buildItems(tab: Tab, config: OpenTuiConfig): SettingItem[] {
+	const copy = COPY[config.settingsLanguage];
 	switch (tab) {
-		case "features": return buildFeaturesItems(config);
-		case "icons": return buildIconsItems(config);
-		case "segments": return buildSegmentsItems(config);
-		case "telemetry": return buildTelemetryItems(config);
+		case "features": return buildFeaturesItems(config, copy);
+		case "icons": return buildIconsItems(config, copy);
+		case "segments": return buildSegmentsItems(config, copy);
+		case "telemetry": return buildTelemetryItems(config, copy);
 	}
 }
 
@@ -117,12 +171,11 @@ function handleSettingChange(
 	itemId: string,
 	config: OpenTuiConfig,
 ): OpenTuiConfig {
-	if (tab === "features" && itemId === "enabled") {
-		return toggleEnabled(config);
+	if (tab === "features") {
+		if (itemId === "enabled") return toggleEnabled(config);
+		if (itemId === "settingsLanguage") return toggleLanguage(config);
 	}
-	if (tab === "icons" && itemId === "mode") {
-		return cycleIconMode(config);
-	}
+	if (tab === "icons" && itemId === "mode") return cycleIconMode(config);
 	if (tab === "segments") {
 		return toggleSetting(config, itemId as keyof OpenTuiConfig["footerSegments"]);
 	}
@@ -149,6 +202,7 @@ class SettingsUi implements SettingsUiHandle {
 	private readonly onClose: () => void;
 	private cachedWidth: number | undefined;
 	private cachedLines: string[] | undefined;
+	private compact = false;
 
 	constructor(
 		theme: Theme,
@@ -171,22 +225,36 @@ class SettingsUi implements SettingsUiHandle {
 		this.rebuild();
 	}
 
-	private rebuild(preferredItemId = this.selectedItemByTab[this.tab]): void {
-		this.container.clear();
-		this.container.addChild(new Text(this.theme.bold(this.theme.fg("accent", "Open TUI Settings")), 1, 0));
+	private applySetting(itemId: string): void {
+		this.selectedItemByTab[this.tab] = itemId;
+		this.config = handleSettingChange(this.tab, itemId, this.config);
+		this.onChange(this.config);
+		this.rebuild(itemId);
+	}
 
-		const tabBar = TABS.map((t) => {
-			const active = t.id === this.tab;
-			const label = active ? `[${t.label}]` : ` ${t.label} `;
+	private switchTab(offset: number): void {
+		const idx = TABS.indexOf(this.tab);
+		this.tab = TABS[(idx + offset + TABS.length) % TABS.length]!;
+		this.rebuild();
+	}
+
+	private rebuild(preferredItemId = this.selectedItemByTab[this.tab]): void {
+		const copy = COPY[this.config.settingsLanguage];
+		this.container.clear();
+		this.container.addChild(new Text(this.theme.bold(this.theme.fg("accent", copy.title)), 1, 0));
+
+		const tabBar = TABS.map((tab) => {
+			const active = tab === this.tab;
+			const label = active ? `[${copy.tabs[tab]}]` : ` ${copy.tabs[tab]} `;
 			return active ? this.theme.fg("accent", label) : this.theme.fg("dim", label);
 		}).join(" ");
 		this.container.addChild(new Text(tabBar, 1, 0));
-		this.container.addChild(new Text(this.theme.fg("dim", "Tab/Shift+Tab to switch · Enter to toggle · Esc to close"), 1, 0));
+		this.container.addChild(new Text(this.theme.fg("dim", copy.hint), 1, 0));
 
 		const items = buildItems(this.tab, this.config).map((item) => ({
 			value: item.id,
-			label: item.label,
-			description: item.currentValue,
+			label: this.compact ? `${item.label}: ${item.currentValue}` : item.label,
+			description: this.compact ? undefined : item.currentValue,
 		} as SelectItem));
 		this.selectList = new SelectList(items, Math.min(items.length, 10), {
 			selectedPrefix: (t) => this.theme.fg("accent", t),
@@ -204,11 +272,7 @@ class SettingsUi implements SettingsUiHandle {
 			this.selectedItemByTab[this.tab] = item.value;
 		};
 		this.selectList.onSelect = (item) => {
-			this.selectedItemByTab[this.tab] = item.value;
-			this.config = handleSettingChange(this.tab, item.value, this.config);
-			this.onChange(this.config);
-			this.rebuild(item.value);
-			this.invalidate();
+			this.applySetting(item.value);
 		};
 		this.selectList.onCancel = () => {
 			this.onClose();
@@ -220,30 +284,35 @@ class SettingsUi implements SettingsUiHandle {
 	}
 
 	handleInput(data: string): void {
-		if (matchesKey(data, Key.tab)) {
-			const idx = TABS.findIndex((t) => t.id === this.tab);
-			this.tab = TABS[(idx + 1) % TABS.length]!.id;
-			this.rebuild();
+		if (matchesKey(data, Key.tab) || matchesKey(data, Key.right)) {
+			this.switchTab(1);
 			this.invalidate();
 			return;
 		}
-		if (matchesKey(data, Key.shift("tab"))) {
-			const idx = TABS.findIndex((t) => t.id === this.tab);
-			this.tab = TABS[(idx - 1 + TABS.length) % TABS.length]!.id;
-			this.rebuild();
+		if (matchesKey(data, Key.shift("tab")) || matchesKey(data, Key.left)) {
+			this.switchTab(-1);
 			this.invalidate();
 			return;
 		}
-		if (matchesKey(data, Key.escape)) {
+		if (matchesKey(data, Key.escape) || matchesKey(data, "q")) {
 			this.onClose();
 			return;
 		}
-		this.selectList.handleInput?.(data);
-		this.invalidate();
+		if (matchesKey(data, Key.space) || data === " ") {
+			const selected = this.selectList.getSelectedItem();
+			if (selected) this.applySetting(selected.value);
+		} else {
+			this.selectList.handleInput?.(data);
+		}
 		this.invalidate();
 	}
 
 	render(width: number): string[] {
+		const compact = width <= 60;
+		if (compact !== this.compact) {
+			this.compact = compact;
+			this.rebuild();
+		}
 		if (this.cachedLines && this.cachedWidth === width) return this.cachedLines;
 		this.cachedWidth = width;
 		this.cachedLines = this.container.render(width);

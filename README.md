@@ -14,7 +14,7 @@ A polished TUI for [Pi](https://pi.dev) coding agent. Combines the best of pi-ha
 - **Working timer** — live elapsed time while the agent is working, done duration when finished
 - **Turn telemetry** — generation speed, TTFT, stalls, tokens, and list-price rate after each complete agent run
 - **Zero prototype patches** — uses public Pi APIs (setHeader/setFooter/setEditorComponent), safe across Pi updates
-- **Interactive settings UI** — `/open-tui` opens a tabbed settings dialog (Features / Icons / Segments / Telemetry)
+- **Interactive settings UI** — `/open-tui` opens a tabbed settings dialog (General / Icons / Footer / Telemetry)
 
 ## Install
 
@@ -35,6 +35,7 @@ Run `/open-tui` to open the interactive settings UI. Configuration is stored at 
 ```json
 {
   "enabled": true,
+  "settingsLanguage": "en",
   "icons": {
     "mode": "auto"
   },
@@ -46,7 +47,8 @@ Run `/open-tui` to open the interactive settings UI. Configuration is stored at 
     "runtime": true,
     "context": true,
     "tokens": true,
-    "cost": true
+    "cost": true,
+    "extensionStatuses": true
   },
   "telemetry": {
     "enabled": true,
@@ -60,8 +62,10 @@ Run `/open-tui` to open the interactive settings UI. Configuration is stored at 
 }
 ```
 
+- `settingsLanguage`: language for the `/open-tui` settings UI only; `en` or `zh`
 - `icons.mode`: `auto` (detect Nerd Font), `nerd` (force Nerd Font glyphs), or `ascii` (plain fallbacks)
 - `footerSegments.gitCommit`: shows short hash + tag on detached HEAD (off by default)
+- `footerSegments.extensionStatuses`: shows statuses published by extensions through Pi's `setStatus()` API (on by default); turn it off to hide the whole status line, including MCP
 
 ## Turn telemetry
 

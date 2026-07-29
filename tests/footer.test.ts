@@ -90,9 +90,13 @@ test("ASCII footer renders icons as semantic labels", () => {
 	);
 	assert.ok(footerFactory);
 
+	let extensionStatusReads = 0;
 	const footerData = {
 		onBranchChange: () => () => {},
-		getExtensionStatuses: () => new Map([["goal", "goal active"]]),
+		getExtensionStatuses: () => {
+			extensionStatusReads++;
+			return new Map([["goal", "goal active"]]);
+		},
 	} as unknown as ReadonlyFooterDataProvider;
 	const component = footerFactory(
 		{ requestRender() {} } as TUI,
@@ -118,4 +122,11 @@ test("ASCII footer renders icons as semantic labels", () => {
 	]) {
 		assert.ok(output.includes(expected), `missing ${expected}\n${output}`);
 	}
+	assert.equal(extensionStatusReads, 1);
+
+	config.footerSegments.extensionStatuses = false;
+	const hiddenOutput = component.render(160);
+	assert.equal(hiddenOutput.length, 2);
+	assert.doesNotMatch(hiddenOutput.join("\n"), /goal active/);
+	assert.equal(extensionStatusReads, 1);
 });

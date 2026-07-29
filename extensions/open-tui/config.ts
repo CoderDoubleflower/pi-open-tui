@@ -3,6 +3,8 @@ import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { IconMode } from "./icons.ts";
 
+export type SettingsLanguage = "en" | "zh";
+
 export type { IconMode } from "./icons.ts";
 
 export interface FooterSegments {
@@ -14,6 +16,7 @@ export interface FooterSegments {
 	context: boolean;
 	tokens: boolean;
 	cost: boolean;
+	extensionStatuses: boolean;
 }
 
 export interface TelemetryConfig {
@@ -28,6 +31,7 @@ export interface TelemetryConfig {
 
 export interface OpenTuiConfig {
 	enabled: boolean;
+	settingsLanguage: SettingsLanguage;
 	icons: {
 		mode: IconMode;
 	};
@@ -37,6 +41,7 @@ export interface OpenTuiConfig {
 
 export const DEFAULT_CONFIG: OpenTuiConfig = {
 	enabled: true,
+	settingsLanguage: "en",
 	icons: {
 		mode: "auto",
 	},
@@ -49,6 +54,7 @@ export const DEFAULT_CONFIG: OpenTuiConfig = {
 		context: true,
 		tokens: true,
 		cost: true,
+		extensionStatuses: true,
 	},
 	telemetry: {
 		enabled: true,
@@ -110,7 +116,11 @@ export function loadConfig(notify?: (msg: string, level: "warning" | "info") => 
 	try {
 		const raw = readFileSync(path, "utf8");
 		const parsed: unknown = JSON.parse(raw);
-		return deepMerge(DEFAULT_CONFIG, parsed);
+		const config = deepMerge(DEFAULT_CONFIG, parsed);
+		if (config.settingsLanguage !== "en" && config.settingsLanguage !== "zh") {
+			config.settingsLanguage = DEFAULT_CONFIG.settingsLanguage;
+		}
+		return config;
 	} catch (err) {
 		notify?.(`open-tui config parse error: ${err instanceof Error ? err.message : String(err)}`, "warning");
 		return structuredClone(DEFAULT_CONFIG);

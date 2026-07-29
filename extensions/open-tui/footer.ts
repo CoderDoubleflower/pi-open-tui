@@ -262,15 +262,17 @@ export function installFooter(
 
 				const mainLines = [line1, line2]
 					.map((line) => truncateToWidth(line, width, theme.fg("dim", "...")));
-				return [
-					...mainLines,
-					...renderExtensionStatusLines(
-						theme,
-						footerData.getExtensionStatuses(),
-						glyphs,
-						width,
-					),
-				];
+				return segments.extensionStatuses
+					? [
+						...mainLines,
+						...renderExtensionStatusLines(
+							theme,
+							footerData.getExtensionStatuses(),
+							glyphs,
+							width,
+						),
+					]
+					: mainLines;
 			},
 		};
 	});
