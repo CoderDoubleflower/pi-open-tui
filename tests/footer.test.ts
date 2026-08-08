@@ -90,6 +90,65 @@ test("narrow footer keeps the cwd basename and drops runtime first", () => {
 	assert.ok(!out.includes("~/work/projects"), `full cwd should be compacted\n${out}`);
 });
 
+test("narrow footer sheds the context bar before left segments", () => {
+	let footerFactory: NonNullable<Parameters<ExtensionContext["ui"]["setFooter"]>[0]> | undefined;
+	const ctx = {
+		model: { provider: "openai", contextWindow: 1_000 },
+		ui: {
+			setFooter(factory: typeof footerFactory) {
+				footerFactory = factory;
+			},
+		},
+		sessionManager: {
+			getCwd: () => "/work/project",
+			getEntries: () => [],
+			getSessionName: () => undefined,
+		},
+		getContextUsage: () => ({ tokens: 250, contextWindow: 1_000, percent: 25 }),
+	} as unknown as ExtensionContext;
+	const config = structuredClone(DEFAULT_CONFIG);
+	config.icons.mode = "ascii";
+	const state: FooterState = {
+		git: { ...emptyGitStatus(), branch: "main" },
+		runtime: null,
+		sessionStartEpoch: Date.now(),
+		workingSince: undefined,
+		lastDoneIn: undefined,
+	};
+	installFooter(
+		ctx,
+		() => state,
+		() => config,
+		() => ({ provider: "OpenAI", model: "gpt-5", effort: "off" }),
+		{ setRequestRender() {}, scheduleGitRefresh() {} },
+	);
+	assert.ok(footerFactory);
+	const footerData = {
+		onBranchChange: () => () => {},
+		getExtensionStatuses: () => new Map(),
+	} as unknown as ReadonlyFooterDataProvider;
+	const component = footerFactory(
+		{ requestRender() {} } as TUI,
+		theme,
+		footerData,
+	) as Component;
+
+	// Roomy width: full bar with tokens is right-aligned on line 1.
+	const wide = component.render(120).join("\n").split("\n")[0]!;
+	assert.ok(wide.includes("250/1.0k"), `full context missing\n${wide}`);
+
+	// Narrow: bar + tokens compact to just icon + pct, cwd survives.
+	const narrow = component.render(40).join("\n").split("\n")[0]!;
+	assert.ok(narrow.includes("25.0%"), `compact pct missing\n${narrow}`);
+	assert.ok(!narrow.includes("250/1.0k"), `token counts should be compacted\n${narrow}`);
+	assert.ok(narrow.includes("project"), `cwd should survive\n${narrow}`);
+
+	// Extremely narrow: the context segment is truncated to nothing useful
+	// once it no longer fits even alone (everything else is already gone).
+	const tiny = component.render(6).join("\n").split("\n")[0]!;
+	assert.ok(!tiny.includes("25.0%"), `context should be dropped\n${tiny}`);
+});
+
 test("both icon modes provide every footer semantic", () => {
 	const keys = [
 		"cwd",

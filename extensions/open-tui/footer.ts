@@ -39,6 +39,15 @@ function renderBar(theme: Theme, pct: number, barWidth: number, ascii: boolean):
 	);
 }
 
+/** Compact context form: icon + percentage, no bar or token counts. */
+function renderContextCompact(theme: Theme, ctx: ExtensionContext, glyphs: IconGlyphs): string {
+	const contextUsage = ctx.getContextUsage();
+	const contextWindow = contextUsage?.contextWindow ?? ctx.model?.contextWindow ?? 0;
+	if (contextWindow <= 0) return "";
+	const contextPct = contextUsage?.percent ?? 0;
+	return `${theme.fg(stressColor(contextPct), glyphs.context)} ${theme.fg(stressColor(contextPct), `${contextPct.toFixed(1)}%`)}`;
+}
+
 function renderGitSegment(
 	theme: Theme,
 	git: GitStatus,
@@ -134,6 +143,8 @@ function renderContextBar(
 	const pctText = theme.fg(stressColor(contextPct), `${contextPct.toFixed(1)}%`);
 	const ctxText = `${theme.fg("text", fmtTokens(contextTokens))}${theme.fg("dim", "/")}${theme.fg("text", fmtTokens(contextWindow))}`;
 	const contextIcon = theme.fg(stressColor(contextPct), glyphs.context);
+	// Cap the bar at `width - reserved` (with a floor of 4) so the full form
+	// never forces the left segments out before compact/drop logic kicks in.
 	const reserved = visibleWidth(contextIcon) + visibleWidth(pctText) + visibleWidth(ctxText) + 5 + 2;
 	const barWidth = Math.max(4, Math.min(12, width - reserved));
 	return `${contextIcon} ${renderBar(theme, contextPct, barWidth, resolveIconMode(iconMode) === "ascii")} ${pctText} ${theme.fg("dim", "·")} ${ctxText}`;
@@ -253,15 +264,26 @@ export function installFooter(
 				const timerSeg = renderTimerSegment(theme, state, glyphs);
 				if (timerSeg) leftParts.push({ text: timerSeg, priority: 1 });
 
-				let rightBlock = "";
+				// The context bar competes with the left segments for the same row:
+				// full bar first, then the compact icon+pct form, then dropped.
+				let contextText = "";
+				let contextCompact: string | undefined;
 				if (segments.context) {
-					rightBlock = renderContextBar(theme, ctx, width, glyphs, config.icons.mode);
+					contextText = renderContextBar(theme, ctx, width, glyphs, config.icons.mode);
+					const compact = renderContextCompact(theme, ctx, glyphs);
+					if (compact && visibleWidth(compact) < visibleWidth(contextText)) {
+						contextCompact = compact;
+					}
+				}
+				const allParts: PrioritizedSegment[] = [...leftParts];
+				if (contextText) {
+					// ponytail: priority 4 = sheds with runtime, before git/timer/cwd.
+					allParts.push({ text: contextText, compactText: contextCompact, priority: 4 });
 				}
 
-				const rightW = visibleWidth(rightBlock);
-				const availLeft = Math.max(0, width - rightW - (rightBlock ? 1 : 0));
-				const fittedLeft = fitSegmentsByPriority(leftParts, availLeft, theme.fg("dim", "..."));
-				const line1 = alignRight(fittedLeft.join(" "), rightBlock, width, theme);
+				const fitted = fitSegmentsByPriority(allParts, width, theme.fg("dim", "..."));
+				const fittedContext = contextText ? fitted.pop() ?? "" : "";
+				const line1 = alignRight(fitted.join(" "), fittedContext, width, theme);
 
 				const modelParts: string[] = [];
 				modelParts.push(theme.fg("mdLink", glyphs.model));
