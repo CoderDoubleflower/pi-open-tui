@@ -3,7 +3,7 @@ import { type OpenTuiConfig, DEFAULT_CONFIG, ensureConfigExists, loadConfig, sav
 import { installEditor } from "./editor.ts";
 import { installFooter } from "./footer.ts";
 import { installHeader } from "./header.ts";
-import { readGitStatus } from "./git.ts";
+import { emptyGitStatus, readGitStatus } from "./git.ts";
 import { readRuntimeInfo } from "./runtime.ts";
 import { SessionLifecycle } from "./session-lifecycle.ts";
 import { registerSettingsCommand } from "./settings-command.ts";
@@ -100,11 +100,18 @@ export default function (pi: ExtensionAPI) {
 
 	const scheduleGitRefresh = async (ctx: ExtensionContext) => {
 		if (!sessionLifecycle.isCurrent()) return;
+		const segs = config.footerSegments;
+		if (!segs.gitBranch && !segs.gitStatus && !segs.gitCommit) {
+			state.git = emptyGitStatus();
+			requestFooterRender?.();
+			return;
+		}
 		const generation = sessionLifecycle.currentGeneration();
 		const cwd = ctx.cwd;
 		const git = await readGitStatus(cwd, {
 			readCommit: true,
-			readTag: config.footerSegments.gitCommit,
+			readTag: segs.gitCommit,
+			readCounts: segs.gitStatus,
 		});
 		if (!sessionLifecycle.isCurrent(generation)) return;
 		state.git = git;
@@ -266,6 +273,12 @@ export default function (pi: ExtensionAPI) {
 				} else {
 					uninstallUi(lastCtx);
 				}
+			}
+			const gitNeeded = newConfig.footerSegments.gitBranch || newConfig.footerSegments.gitStatus || newConfig.footerSegments.gitCommit;
+			if (lastCtx && gitNeeded) {
+				void scheduleGitRefresh(lastCtx);
+			} else {
+				state.git = emptyGitStatus();
 			}
 			requestFooterRender?.();
 		},

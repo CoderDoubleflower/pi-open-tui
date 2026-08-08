@@ -57,7 +57,7 @@ async function gitExec(args: string[], cwd: string): Promise<string | null> {
 
 export async function readGitStatus(
 	cwd: string,
-	options: { readCommit?: boolean; readTag?: boolean } = {},
+	options: { readCommit?: boolean; readTag?: boolean; readCounts?: boolean } = {},
 ): Promise<GitStatus> {
 	if (!existsSync(join(cwd, ".git"))) {
 		return emptyGitStatus();
@@ -102,6 +102,9 @@ export async function readGitStatus(
 			continue;
 		}
 
+		// ponytail: skip file-entry counting when only branch/commit display is on;
+		// the first `git status` call itself can't be split, but the stash fallback below can.
+		if (options.readCounts === false) continue;
 		if (line.length < 3) continue;
 		const x = line[0]!;
 		const y = line[1]!;
@@ -116,7 +119,7 @@ export async function readGitStatus(
 		}
 	}
 
-	if (stashSupported && status.stashed === 0 && !stdout.includes("# stash")) {
+	if (options.readCounts !== false && stashSupported && status.stashed === 0 && !stdout.includes("# stash")) {
 		const stashOut = await gitExec(["stash", "list", "--count"], cwd);
 		if (stashOut !== null) {
 			const count = parseInt(stashOut.trim(), 10);
