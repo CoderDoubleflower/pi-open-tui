@@ -11,10 +11,84 @@ import { installFooter } from "../extensions/open-tui/footer.ts";
 import { emptyGitStatus } from "../extensions/open-tui/git.ts";
 import { resolveGlyphs } from "../extensions/open-tui/icons.ts";
 import type { FooterState } from "../extensions/open-tui/state.ts";
+import { fitSegmentsByPriority, truncateBranch, truncatePath } from "../extensions/open-tui/utils.ts";
 
 const theme = {
 	fg: (_color: string, text: string) => text,
 } as Theme;
+
+test("branch truncation preserves the branch prefix", () => {
+	assert.equal(truncateBranch("fix/cwd-footer-truncation", 20), "fix/cwd-footer-tr...");
+	assert.equal(truncateBranch("main", 20), "main");
+});
+
+test("cwd path truncation keeps head and tail segments", () => {
+	assert.equal(truncatePath("~/projects/pi-open-tui", 30), "~/projects/pi-open-tui");
+	assert.equal(truncatePath("~/projects/pi-open-tui", 18), "~/.../pi-open-tui");
+});
+
+test("footer compacts cwd before truncating lower-priority segments", () => {
+	assert.deepEqual(
+		fitSegmentsByPriority(
+			[
+				{ text: "@ ~/projects/pi-open-tui", compactText: "@ pi-open-tui", priority: 0 },
+				{ text: "* fix/cwd-footer-truncation", priority: 3 },
+				{ text: "node 24.6.0", priority: 4 },
+			],
+			53,
+		),
+		["@ pi-open-tui", "* fix/cwd-footer-truncation", "node 24.6.0"],
+	);
+});
+
+test("narrow footer keeps the cwd basename and drops runtime first", () => {
+	let footerFactory: NonNullable<Parameters<ExtensionContext["ui"]["setFooter"]>[0]> | undefined;
+	const ctx = {
+		model: { provider: "openai", contextWindow: 1_000 },
+		ui: {
+			setFooter(factory: typeof footerFactory) {
+				footerFactory = factory;
+			},
+		},
+		sessionManager: {
+			getCwd: () => "/work/projects/pi-open-tui",
+			getEntries: () => [],
+			getSessionName: () => undefined,
+		},
+		getContextUsage: () => ({ tokens: 0, contextWindow: 1_000, percent: 0 }),
+	} as unknown as ExtensionContext;
+	const config = structuredClone(DEFAULT_CONFIG);
+	config.icons.mode = "ascii";
+	const state: FooterState = {
+		git: { ...emptyGitStatus(), branch: "main" },
+		runtime: { name: "nodejs", version: "24.6.0" },
+		sessionStartEpoch: Date.now(),
+		workingSince: undefined,
+		lastDoneIn: undefined,
+	};
+	installFooter(
+		ctx,
+		() => state,
+		() => config,
+		() => ({ provider: "OpenAI", model: "gpt-5", effort: "off" }),
+		{ setRequestRender() {}, scheduleGitRefresh() {} },
+	);
+	assert.ok(footerFactory);
+	const footerData = {
+		onBranchChange: () => () => {},
+		getExtensionStatuses: () => new Map(),
+	} as unknown as ReadonlyFooterDataProvider;
+	const component = footerFactory(
+		{ requestRender() {} } as TUI,
+		theme,
+		footerData,
+	) as Component;
+	// Width 59: the full cwd does not fit alongside git+runtime+context bar.
+	// The footer compacts the cwd to its basename before dropping segments.
+	const out = component.render(59).join("\n");
+	assert.ok(out.includes("pi-o"), `cwd basename prefix missing\n${out}`);
+	assert.ok(!out.includes("~/work/projects"), `full cwd should be compacted\n${out}`);
+});
 
 test("both icon modes provide every footer semantic", () => {
 	const keys = [

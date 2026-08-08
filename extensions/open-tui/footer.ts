@@ -7,6 +7,7 @@ import type { GitStatus } from "./git.ts";
 import type { RuntimeInfo } from "./runtime.ts";
 import {
 	alignRight,
+	basenamePath,
 	cacheHitColor,
 	effortColor,
 	fitSegmentsByPriority,
@@ -17,7 +18,9 @@ import {
 	providerColor,
 	sanitizeStatus,
 	stressColor,
+	truncateBranch,
 	truncatePath,
+	type PrioritizedSegment,
 } from "./utils.ts";
 import type { FooterState, ModelMeta, UsageTotals } from "./state.ts";
 import { getUsageTotals } from "./state.ts";
@@ -47,7 +50,7 @@ function renderGitSegment(
 	if (segments.gitBranch) {
 		if (git.branch) {
 			parts.push(theme.fg("mdLink", glyphs.git));
-			parts.push(theme.fg("mdLink", truncatePath(git.branch, maxBranchLen)));
+			parts.push(theme.fg("mdLink", truncateBranch(git.branch, maxBranchLen)));
 		} else if (git.commit?.detached) {
 			parts.push(theme.fg("warning", glyphs.git));
 			parts.push(theme.fg("warning", "HEAD"));
@@ -213,12 +216,23 @@ export function installFooter(
 
 				const totals = getUsageTotals(ctx);
 
-				const leftParts: { text: string; priority: number }[] = [];
+				const leftParts: PrioritizedSegment[] = [];
 				if (segments.cwd) {
 					const maxCwd = Math.min(30, Math.max(10, Math.floor(width * 0.4)));
+					const cwd = formatCwd(ctx.sessionManager.getCwd());
+					const cwdPrefix = `${theme.fg("mdLink", glyphs.cwd)} `;
+					const accent = (text: string) => theme.fg("accent", text);
 					leftParts.push({
-						text: `${theme.fg("mdLink", glyphs.cwd)} ${theme.fg("accent", truncatePath(formatCwd(ctx.sessionManager.getCwd()), maxCwd))}`,
+						text: `${cwdPrefix}${accent(truncatePath(cwd, maxCwd))}`,
+						compactText: `${cwdPrefix}${accent(truncatePath(basenamePath(cwd), maxCwd))}`,
 						priority: 0,
+						truncate: (_text, maxWidth, ellipsis) => {
+							const pathWidth = maxWidth - visibleWidth(cwdPrefix);
+							if (pathWidth <= visibleWidth(ellipsis)) {
+								return truncateToWidth(`${cwdPrefix}${accent(basenamePath(cwd))}`, maxWidth, ellipsis);
+							}
+							return `${cwdPrefix}${accent(truncatePath(basenamePath(cwd), pathWidth))}`;
+						},
 					});
 				}
 				if (segments.sessionName) {
