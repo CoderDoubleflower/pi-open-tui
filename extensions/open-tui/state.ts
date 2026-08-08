@@ -83,7 +83,7 @@ export function getModelMeta(
 	getThinkingLevel: () => string,
 ): ModelMeta {
 	const provider = formatProviderLabel(ctx.model?.provider);
-	const model = ctx.model?.id ?? "no-model";
+	const model = ctx.model?.name ?? ctx.model?.id ?? "no-model";
 	const reasoning = ctx.model?.reasoning ?? false;
 	const effort = reasoning ? getThinkingLevel() : undefined;
 	return { provider, model, effort };
