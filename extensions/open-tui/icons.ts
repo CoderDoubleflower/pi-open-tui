@@ -68,7 +68,7 @@ const ASCII_GLYPHS: IconGlyphs = {
 	git: "*",
 	working: "o",
 	done: "+",
-	context: "%",
+	context: "#",
 	model: "M",
 	thinking: "~",
 	input: "↑",

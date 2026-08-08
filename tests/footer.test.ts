@@ -246,7 +246,7 @@ test("ASCII footer renders icons as semantic labels", () => {
 		"!2",
 		"node 24.6.0",
 		"o working",
-		"%",
+		"#",
 		"M",
 		"~ high",
 		"↑ 100",
