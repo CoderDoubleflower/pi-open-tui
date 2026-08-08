@@ -30,6 +30,7 @@ const COPY = {
 			language: "Language",
 			iconMode: "Icon mode",
 			cwd: "CWD",
+			sessionName: "Session name",
 			gitBranch: "Git branch",
 			gitStatus: "Git status",
 			gitCommit: "Git commit (detached)",
@@ -59,6 +60,7 @@ const COPY = {
 			language: "语言",
 			iconMode: "图标模式",
 			cwd: "当前目录",
+			sessionName: "会话名",
 			gitBranch: "Git 分支",
 			gitStatus: "Git 状态",
 			gitCommit: "Git 提交（分离 HEAD）",
@@ -131,6 +133,7 @@ function buildSegmentsItems(config: OpenTuiConfig, copy: SettingsCopy): SettingI
 	const flag = (value: boolean) => value ? copy.values.on : copy.values.off;
 	return [
 		{ id: "cwd", label: copy.labels.cwd, currentValue: flag(segs.cwd) },
+		{ id: "sessionName", label: copy.labels.sessionName, currentValue: flag(segs.sessionName) },
 		{ id: "gitBranch", label: copy.labels.gitBranch, currentValue: flag(segs.gitBranch) },
 		{ id: "gitStatus", label: copy.labels.gitStatus, currentValue: flag(segs.gitStatus) },
 		{ id: "gitCommit", label: copy.labels.gitCommit, currentValue: flag(segs.gitCommit) },

@@ -41,6 +41,7 @@ Run `/open-tui` to open the interactive settings UI. Configuration is stored at 
   },
   "footerSegments": {
     "cwd": true,
+    "sessionName": false,
     "gitBranch": true,
     "gitStatus": true,
     "gitCommit": false,
@@ -64,6 +65,7 @@ Run `/open-tui` to open the interactive settings UI. Configuration is stored at 
 
 - `settingsLanguage`: language for the `/open-tui` settings UI only; `en` or `zh`
 - `icons.mode`: `auto` (detect Nerd Font), `nerd` (force Nerd Font glyphs), or `ascii` (plain fallbacks)
+- `footerSegments.sessionName`: shows the current session name next to cwd (off by default); hidden when the session has no name
 - `footerSegments.gitCommit`: shows short hash + tag on detached HEAD (off by default)
 - `footerSegments.extensionStatuses`: shows statuses published by extensions through Pi's `setStatus()` API (on by default); turn it off to hide the whole status line, including MCP
 

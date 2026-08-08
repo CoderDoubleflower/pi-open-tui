@@ -221,14 +221,23 @@ export function installFooter(
 						priority: 0,
 					});
 				}
+				if (segments.sessionName) {
+					const sessionName = ctx.sessionManager.getSessionName();
+					if (sessionName) {
+						leftParts.push({
+							text: `${theme.fg("dim", glyphs.session)} ${theme.fg("text", truncateToWidth(sessionName, 24, theme.fg("dim", "...")))}`,
+							priority: 2,
+						});
+					}
+				}
 				const gitSeg = renderGitSegment(theme, state.git, glyphs, segments);
 				if (gitSeg) leftParts.push({ text: gitSeg, priority: 3 });
 				if (segments.runtime) {
 					const runtimeSeg = renderRuntimeSegment(theme, state.runtime, config.icons.mode);
-					if (runtimeSeg) leftParts.push({ text: runtimeSeg, priority: 1 });
+					if (runtimeSeg) leftParts.push({ text: runtimeSeg, priority: 4 });
 				}
 				const timerSeg = renderTimerSegment(theme, state, glyphs);
-				if (timerSeg) leftParts.push({ text: timerSeg, priority: 2 });
+				if (timerSeg) leftParts.push({ text: timerSeg, priority: 1 });
 
 				let rightBlock = "";
 				if (segments.context) {
