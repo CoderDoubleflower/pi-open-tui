@@ -33,6 +33,10 @@ export interface TelemetryConfig {
 export interface OpenTuiConfig {
 	enabled: boolean;
 	settingsLanguage: SettingsLanguage;
+	footerScript: string | null;
+	editor: {
+		dynamicBorderColor: boolean;
+	};
 	icons: {
 		mode: IconMode;
 	};
@@ -43,6 +47,10 @@ export interface OpenTuiConfig {
 export const DEFAULT_CONFIG: OpenTuiConfig = {
 	enabled: true,
 	settingsLanguage: "en",
+	footerScript: null,
+	editor: {
+		dynamicBorderColor: false,
+	},
 	icons: {
 		mode: "auto",
 	},
@@ -121,6 +129,12 @@ export function loadConfig(notify?: (msg: string, level: "warning" | "info") => 
 		const config = deepMerge(DEFAULT_CONFIG, parsed);
 		if (config.settingsLanguage !== "en" && config.settingsLanguage !== "zh") {
 			config.settingsLanguage = DEFAULT_CONFIG.settingsLanguage;
+		}
+		if (config.footerScript !== null && typeof config.footerScript !== "string") {
+			config.footerScript = DEFAULT_CONFIG.footerScript;
+		}
+		if (typeof config.editor.dynamicBorderColor !== "boolean") {
+			config.editor.dynamicBorderColor = DEFAULT_CONFIG.editor.dynamicBorderColor;
 		}
 		return config;
 	} catch (err) {

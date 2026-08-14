@@ -8,7 +8,7 @@ A polished TUI for [Pi](https://pi.dev) coding agent. Combines the best of pi-ha
 
 - **Animated Pi logo header** — 16-frame color-changing logo animation + "Let's build something great" tagline
 - **Starship-style footer** — 2 lines showing cwd, git branch/status, runtime version, context bar, model, token counts, and cost
-- **Rounded editor** — accent rail + borderMuted rounded corners, clean visual frame
+- **Full-width prompt editor** — horizontal borders with a fixed `❯` prompt and aligned continuation lines
 - **60+ runtime detection** — Node, Rust, Go, Python, Ruby, Java, Swift, Kotlin, C/C++, Deno, Bun, and many more
 - **Git status** — branch, ahead/behind, modified/untracked/staged/stashed, detached HEAD commit hash + tag
 - **Working timer** — live elapsed time while the agent is working, done duration when finished
@@ -41,6 +41,10 @@ Run `/open-tui` to open the interactive settings UI. Configuration is stored at 
 {
   "enabled": true,
   "settingsLanguage": "en",
+  "footerScript": null,
+  "editor": {
+    "dynamicBorderColor": false
+  },
   "icons": {
     "mode": "auto"
   },
@@ -69,10 +73,46 @@ Run `/open-tui` to open the interactive settings UI. Configuration is stored at 
 ```
 
 - `settingsLanguage`: language for the `/open-tui` settings UI only; `en` or `zh`
+- `editor.dynamicBorderColor`: when `false` (default), editor borders use RGB `(103,103,103)`; when `true`, only the horizontal borders follow Pi's bash/thinking color
 - `icons.mode`: `auto` (detect Nerd Font), `nerd` (force Nerd Font glyphs), or `ascii` (plain fallbacks)
 - `footerSegments.sessionName`: shows the current session name next to cwd (off by default); hidden when the session has no name
 - `footerSegments.gitCommit`: shows short hash + tag on detached HEAD (off by default)
 - `footerSegments.extensionStatuses`: shows statuses published by extensions through Pi's `setStatus()` API (on by default); turn it off to hide the whole status line, including MCP
+
+## Custom Footer script
+
+Set `footerScript` to the absolute path of an executable file to replace the built-in Footer. The file must have execute permission and a valid shebang. It is launched directly in the current project directory; no shell command interpolation is used.
+
+See [`examples/open-tui-footer.sh`](examples/open-tui-footer.sh) for a complete executable demo with ANSI colors, cache hit rate, extension statuses, and commented mappings for every protocol field.
+
+```json
+{
+  "footerScript": "/home/me/.pi/agent/footer.sh"
+}
+```
+
+The script receives one UTF-8 JSON object on stdin. Protocol `version: 1` provides:
+
+- `terminal.width` and `time.{nowMs,nowIso}`
+- `session.{cwd,name,startedAtMs}`
+- `model.{id,name,provider,reasoning,thinkingLevel,contextWindow}`
+- `context.{tokens,contextWindow,percent}`
+- `usage.{input,output,cacheRead,cacheWrite,cost,latestCacheHitRate}`
+- complete `git` status and optional `runtime`
+- `timer.{working,workingSinceMs,workingElapsedMs,lastDoneInMs}`
+- `extensionStatuses`, sorted by extension id
+
+Missing values are JSON `null`. Raw messages, credentials, and environment variables are never included. A minimal script:
+
+```sh
+#!/bin/sh
+payload=$(cat)
+printf 'custom footer\n'
+```
+
+Stdout becomes the Footer and may contain multiple lines and ANSI SGR colors. Other terminal control sequences are removed, and each line is clipped to the terminal width. Empty stdout hides the Footer.
+
+Execution is asynchronous and cached. State changes or terminal width changes trigger a refresh; while the agent is working, refreshes are limited to once per second. The timeout is 1000 ms. On failure, the most recent successful output remains visible; before the first success, open-tui falls back to the built-in Footer and emits one warning per failure streak. `footerScript` always takes precedence over every `footerSegments` menu setting.
 
 ## Turn telemetry
 

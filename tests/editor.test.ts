@@ -21,7 +21,7 @@ const editorTheme = {
 	},
 } as EditorTheme;
 
-test("compensates Pi editor padding for the custom left rail", () => {
+test("compensates Pi editor padding for the fixed prompt", () => {
 	const editor = new OpenTuiEditor(
 		tui,
 		editorTheme,
@@ -36,7 +36,7 @@ test("compensates Pi editor padding for the custom left rail", () => {
 	assert.equal(contentLine.indexOf("x"), 2);
 });
 
-test("frame recolors via borderColor (bash mode / thinking level hook)", () => {
+test("renders full-width horizontal borders and a fixed prompt", () => {
 	let painted = "";
 	const theme = {
 		...editorTheme,
@@ -53,11 +53,50 @@ test("frame recolors via borderColor (bash mode / thinking level hook)", () => {
 	editor.setText("hi");
 
 	const lines = editor.render(40);
-	const top = stripAnsi(lines[0] ?? "");
-	const body = stripAnsi(lines[1] ?? "");
+	const top = lines[0] ?? "";
+	const body = lines[1] ?? "";
 
-	// Top border and rail both route through borderColor.
-	assert.ok(top.startsWith("╭") && top.endsWith("╮"), `top border shape: ${top!}`);
-	assert.ok(body.startsWith("│") && body.endsWith("│"), `body rails: ${body!}`);
-	assert.ok(painted.length > 0, "borderColor was invoked for the frame");
+	assert.equal(stripAnsi(top), "─".repeat(40));
+	assert.match(top, /^\x1b\[38;2;103;103;103m/);
+	assert.equal(stripAnsi(body).indexOf("❯ hi"), 0);
+	assert.match(body, /^\x1b\[38;2;181;181;181m❯\x1b\[0m /);
+	assert.equal(painted, "─", "the base editor may paint its internal border before it is replaced");
+});
+
+test("dynamic border color only recolors the horizontal borders", () => {
+	let paintCalls = 0;
+	const theme = {
+		...editorTheme,
+		borderColor: (text: string) => {
+			paintCalls++;
+			return `\x1b[32m${text}\x1b[0m`;
+		},
+	} as EditorTheme;
+	const editor = new OpenTuiEditor(
+		tui,
+		theme,
+		{ matches: () => false } as unknown as KeybindingsManager,
+		() => true,
+	);
+	editor.setText("hi");
+
+	const lines = editor.render(40);
+	assert.equal(stripAnsi(lines[0] ?? ""), "─".repeat(40));
+	assert.equal(stripAnsi(lines[1] ?? "").startsWith("❯ hi"), true);
+	assert.equal(paintCalls, 3, "Pi paints the base border once, then both output borders");
+});
+
+test("shows the prompt on an empty editor and indents continuation lines", () => {
+	const editor = new OpenTuiEditor(
+		tui,
+		editorTheme,
+		{ matches: () => false } as unknown as KeybindingsManager,
+	);
+
+	assert.equal(stripAnsi(editor.render(20)[1] ?? "").startsWith("❯ "), true);
+	editor.setText("first\nsecond");
+	const lines = editor.render(20).map(stripAnsi);
+	assert.equal(lines[1]?.startsWith("❯ first"), true);
+	assert.equal(lines[2]?.startsWith("  second"), true);
+	assert.ok(lines.every((line) => line.length === 20));
 });

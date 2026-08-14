@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import type {
 	ExtensionContext,
@@ -352,4 +355,65 @@ test("session name uses matching glyph in nerd and ascii modes", () => {
 	assert.ok(asciiOut.includes(resolveGlyphs("ascii").session), `ascii glyph missing\n${asciiOut}`);
 	const nerdOut = renderFooterWithSession({ mode: "nerd", sessionName: "sess" });
 	assert.ok(nerdOut.includes(resolveGlyphs("nerd").session), `nerd glyph missing\n${nerdOut}`);
+});
+
+test("configured footer script takes precedence over built-in segments", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "pi-open-tui-footer-"));
+	const script = join(dir, "footer.sh");
+	writeFileSync(script, "#!/bin/sh\nprintf 'script line 1\\nscript line 2\\n'\n", "utf8");
+	chmodSync(script, 0o755);
+
+	try {
+		let footerFactory: NonNullable<Parameters<ExtensionContext["ui"]["setFooter"]>[0]> | undefined;
+		const ctx = {
+			model: { id: "gpt-5", provider: "openai", contextWindow: 1_000 },
+			ui: {
+				setFooter(factory: typeof footerFactory) {
+					footerFactory = factory;
+				},
+				notify() {},
+			},
+			sessionManager: {
+				getCwd: () => process.cwd(),
+				getEntries: () => [],
+				getSessionName: () => undefined,
+			},
+			getContextUsage: () => ({ tokens: 0, contextWindow: 1_000, percent: 0 }),
+		} as unknown as ExtensionContext;
+		const config = structuredClone(DEFAULT_CONFIG);
+		config.footerScript = script;
+		for (const key of Object.keys(config.footerSegments) as Array<keyof typeof config.footerSegments>) {
+			config.footerSegments[key] = false;
+		}
+		installFooter(
+			ctx,
+			() => ({
+				git: emptyGitStatus(),
+				runtime: null,
+				sessionStartEpoch: Date.now(),
+				workingSince: undefined,
+				lastDoneIn: undefined,
+			}),
+			() => config,
+			() => ({ provider: "OpenAI", model: "gpt-5", effort: "off" }),
+			{ setRequestRender() {}, scheduleGitRefresh() {} },
+		);
+		assert.ok(footerFactory);
+		const footerData = {
+			onBranchChange: () => () => {},
+			getExtensionStatuses: () => new Map(),
+		} as unknown as ReadonlyFooterDataProvider;
+		const component = footerFactory(
+			{ requestRender() {} } as TUI,
+			theme,
+			footerData,
+		) as Component & { dispose?: () => void };
+
+		component.render(80);
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		assert.deepEqual(component.render(80), ["script line 1", "script line 2"]);
+		component.dispose?.();
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
 });

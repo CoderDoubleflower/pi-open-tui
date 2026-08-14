@@ -80,7 +80,7 @@ export default function (pi: ExtensionAPI) {
 					},
 				},
 			);
-			cleanupEditor = installEditor(pi, ctx);
+			cleanupEditor = installEditor(pi, ctx, () => config.editor.dynamicBorderColor);
 			active = true;
 		}
 	};
@@ -102,7 +102,8 @@ export default function (pi: ExtensionAPI) {
 	const scheduleGitRefresh = async (ctx: ExtensionContext) => {
 		if (!sessionLifecycle.isCurrent()) return;
 		const segs = config.footerSegments;
-		if (!segs.gitBranch && !segs.gitStatus && !segs.gitCommit) {
+		const scriptEnabled = config.footerScript !== null;
+		if (!scriptEnabled && !segs.gitBranch && !segs.gitStatus && !segs.gitCommit) {
 			state.git = emptyGitStatus();
 			requestFooterRender?.();
 			return;
@@ -111,8 +112,8 @@ export default function (pi: ExtensionAPI) {
 		const cwd = ctx.cwd;
 		const git = await readGitStatus(cwd, {
 			readCommit: true,
-			readTag: segs.gitCommit,
-			readCounts: segs.gitStatus,
+			readTag: scriptEnabled || segs.gitCommit,
+			readCounts: scriptEnabled || segs.gitStatus,
 		});
 		if (!sessionLifecycle.isCurrent(generation)) return;
 		state.git = git;
@@ -274,7 +275,10 @@ export default function (pi: ExtensionAPI) {
 				// and strands it without keyboard input.
 				pendingUiChange = newConfig.enabled ? "install" : "uninstall";
 			}
-			const gitNeeded = newConfig.footerSegments.gitBranch || newConfig.footerSegments.gitStatus || newConfig.footerSegments.gitCommit;
+			const gitNeeded = newConfig.footerScript !== null
+				|| newConfig.footerSegments.gitBranch
+				|| newConfig.footerSegments.gitStatus
+				|| newConfig.footerSegments.gitCommit;
 			if (lastCtx && gitNeeded) {
 				void scheduleGitRefresh(lastCtx);
 			} else {

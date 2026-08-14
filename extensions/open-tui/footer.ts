@@ -24,6 +24,7 @@ import {
 } from "./utils.ts";
 import type { FooterState, ModelMeta, UsageTotals } from "./state.ts";
 import { getUsageTotals } from "./state.ts";
+import { buildFooterScriptInput, FooterScriptRunner } from "./footer-script.ts";
 
 function renderBar(theme: Theme, pct: number, barWidth: number, ascii: boolean): string {
 	const filled = Math.max(0, Math.min(barWidth, Math.round((pct / 100) * barWidth)));
@@ -206,6 +207,10 @@ export function installFooter(
 ): () => void {
 	ctx.ui.setFooter((tui, theme, footerData) => {
 		hooks.setRequestRender(() => tui.requestRender());
+		const footerScript = new FooterScriptRunner({
+			notifyWarning: (message) => ctx.ui.notify(message, "warning"),
+			requestRender: () => tui.requestRender(),
+		});
 		const unsubBranch = footerData.onBranchChange(() => {
 			hooks.scheduleGitRefresh();
 			tui.requestRender();
@@ -214,6 +219,7 @@ export function installFooter(
 		return {
 			dispose() {
 				unsubBranch();
+				footerScript.dispose();
 				hooks.setRequestRender(undefined);
 			},
 			invalidate() {},
@@ -224,6 +230,16 @@ export function installFooter(
 				const glyphs = resolveGlyphs(config.icons.mode);
 				const segments = config.footerSegments;
 				const meta = getModelMeta();
+				if (config.footerScript !== null) {
+					const scriptLines = footerScript.render(
+						config.footerScript,
+						buildFooterScriptInput(ctx, state, meta, footerData, width),
+						width,
+					);
+					if (scriptLines !== undefined) return scriptLines;
+				} else {
+					footerScript.disable();
+				}
 
 				const totals = getUsageTotals(ctx);
 
