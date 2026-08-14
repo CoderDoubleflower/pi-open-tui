@@ -15,6 +15,7 @@ A polished TUI for [Pi](https://pi.dev) coding agent. Combines the best of pi-ha
 - **Turn telemetry** — generation speed, TTFT, stalls, tokens, and list-price rate after each complete agent run
 - **Zero prototype patches** — uses public Pi APIs (setHeader/setFooter/setEditorComponent), safe across Pi updates
 - **Interactive settings UI** — `/open-tui` opens a tabbed settings dialog (General / Icons / Footer / Telemetry)
+- **Claude-inspired theme** — optional dark theme with a `#d78787` accent and terminal-friendly backgrounds
 
 ## Install
 
@@ -27,6 +28,10 @@ Or try it for one run:
 ```bash
 pi -e npm:pi-open-tui
 ```
+
+## Theme
+
+The package includes the optional `claude-theme` dark theme. After installing the package, open `/settings` and select `claude-theme` from the theme list. The package does not change your active theme automatically.
 
 ## Configuration
 
