@@ -22,11 +22,14 @@ async function openSettings(initialConfig = structuredClone(DEFAULT_CONFIG)): Pr
 	component: SettingsComponent;
 	getConfig: () => OpenTuiConfig;
 	isClosed: () => boolean;
+	isOverlayClosed: () => boolean;
+	waitForClose: () => Promise<void>;
 }> {
 	let commandHandler: ((args: string, ctx: ExtensionContext) => Promise<void> | void) | undefined;
 	let component: SettingsComponent | undefined;
 	let config = initialConfig;
 	let closed = false;
+	let overlayClosed = false;
 
 	const pi = {
 		registerCommand: (_name: string, options: { handler: typeof commandHandler }) => {
@@ -39,6 +42,9 @@ async function openSettings(initialConfig = structuredClone(DEFAULT_CONFIG)): Pr
 		onConfigChanged: (nextConfig) => {
 			config = nextConfig;
 		},
+		onOverlayClosed: () => {
+			overlayClosed = true;
+		},
 	});
 
 	const tui = { requestRender() {} } as TUI;
@@ -46,31 +52,57 @@ async function openSettings(initialConfig = structuredClone(DEFAULT_CONFIG)): Pr
 		hasUI: true,
 		mode: "tui",
 		ui: {
-			custom: async (
+			custom: (
 				factory: (
 					tui: TUI,
 					theme: Theme,
 					keybindings: KeybindingsManager,
 					done: (value: void) => void,
 				) => Component,
-			) => {
+			) => new Promise<void>((resolve) => {
 				component = factory(tui, theme, {} as KeybindingsManager, (_value: void) => {
 					closed = true;
+					resolve();
 				}) as SettingsComponent;
-			},
+			}),
 		},
 	} as unknown as ExtensionContext;
 
 	assert.ok(commandHandler);
-	await commandHandler("", ctx);
+	const closePromise = Promise.resolve(commandHandler("", ctx));
 	assert.ok(component);
 
-	return { component, getConfig: () => config, isClosed: () => closed };
+	return {
+		component,
+		getConfig: () => config,
+		isClosed: () => closed,
+		isOverlayClosed: () => overlayClosed,
+		waitForClose: () => closePromise,
+	};
 }
 
 function selectedLine(component: SettingsComponent): string {
 	return component.render(80).find((line) => line.includes("→ ")) ?? "";
 }
+
+test("closes cleanly after enabling or disabling the UI", async () => {
+	for (const enabled of [true, false]) {
+		const config = structuredClone(DEFAULT_CONFIG);
+		config.enabled = enabled;
+		const settings = await openSettings(config);
+
+		settings.component.handleInput("\r");
+		assert.equal(settings.getConfig().enabled, !enabled);
+		assert.equal(settings.isClosed(), false);
+		assert.equal(settings.isOverlayClosed(), false);
+
+		settings.component.handleInput("q");
+		assert.equal(settings.isClosed(), true);
+		assert.equal(settings.isOverlayClosed(), false);
+		await settings.waitForClose();
+		assert.equal(settings.isOverlayClosed(), true);
+	}
+});
 
 test("keeps the changed setting selected", async () => {
 	const settings = await openSettings();
