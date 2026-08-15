@@ -10,6 +10,8 @@ import { findBottomBorderIndex, isEditorBorderLine, stripAnsi } from "./utils.ts
 
 const BORDER_RGB = "\x1b[38;2;103;103;103m";
 const PROMPT_RGB = "\x1b[38;2;181;181;181m";
+const AUTOCOMPLETE_SELECTED_RGB = "\x1b[38;2;175;215;255m";
+const AUTOCOMPLETE_UNSELECTED_RGB = "\x1b[38;2;122;122;122m";
 const RESET = "\x1b[0m";
 const PROMPT_WIDTH = 2;
 
@@ -17,6 +19,16 @@ function fillLine(content: string, width: number): string {
 	const truncated = truncateToWidth(content, Math.max(0, width), "");
 	const pad = " ".repeat(Math.max(0, width - visibleWidth(truncated)));
 	return `${truncated}${pad}`;
+}
+
+export function paintAutocompleteLine(line: string): string {
+	const plain = stripAnsi(line);
+	const selected = plain.startsWith("→ ");
+	const color = selected
+		? AUTOCOMPLETE_SELECTED_RGB
+		: AUTOCOMPLETE_UNSELECTED_RGB;
+	const content = selected ? `  ${plain.slice(2)}` : plain;
+	return `${color}${content}${RESET}`;
 }
 
 function horizontalBorder(
@@ -80,7 +92,8 @@ export class OpenTuiEditor extends CustomEditor {
 		result.push(horizontalBorder(width, borderPaint, baseLines[bottomIdx]));
 
 		for (let i = bottomIdx + 1; i < baseLines.length; i++) {
-			result.push(`${" ".repeat(PROMPT_WIDTH)}${fillLine(baseLines[i]!, innerWidth)}`);
+			const autocompleteLine = paintAutocompleteLine(baseLines[i]!);
+			result.push(`${" ".repeat(PROMPT_WIDTH)}${fillLine(autocompleteLine, innerWidth)}`);
 		}
 
 		return result.map((line) => truncateToWidth(line, width, ""));

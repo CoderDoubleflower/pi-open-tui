@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { KeybindingsManager } from "@earendil-works/pi-coding-agent";
 import type { EditorTheme, TUI } from "@earendil-works/pi-tui";
-import { OpenTuiEditor } from "../extensions/open-tui/editor.ts";
+import { OpenTuiEditor, paintAutocompleteLine } from "../extensions/open-tui/editor.ts";
 import { stripAnsi } from "../extensions/open-tui/utils.ts";
 
 const tui = {
@@ -99,4 +99,12 @@ test("shows the prompt on an empty editor and indents continuation lines", () =>
 	assert.equal(lines[1]?.startsWith("❯ first"), true);
 	assert.equal(lines[2]?.startsWith("  second"), true);
 	assert.ok(lines.every((line) => line.length === 20));
+});
+
+test("uses dedicated colors for selected and unselected autocomplete items", () => {
+	const selected = paintAutocompleteLine("\x1b[31m→ selected\x1b[0m");
+	const unselected = paintAutocompleteLine("  unselected");
+
+	assert.equal(selected, "\x1b[38;2;175;215;255m  selected\x1b[0m");
+	assert.equal(unselected, "\x1b[38;2;122;122;122m  unselected\x1b[0m");
 });
