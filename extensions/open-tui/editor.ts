@@ -6,6 +6,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { EditorTheme, TUI } from "@earendil-works/pi-tui";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import type { AutocompleteDirection } from "./config.ts";
 import { findBottomBorderIndex, isEditorBorderLine, stripAnsi } from "./utils.ts";
 
 const BORDER_RGB = "\x1b[38;2;103;103;103m";
@@ -59,15 +60,18 @@ function horizontalBorder(
 
 export class OpenTuiEditor extends CustomEditor {
 	private readonly getDynamicBorderColor: () => boolean;
+	private readonly getAutocompleteDirection: () => AutocompleteDirection;
 
 	constructor(
 		tui: TUI,
 		editorTheme: EditorTheme,
 		keybindings: KeybindingsManager,
 		getDynamicBorderColor: () => boolean = () => false,
+		getAutocompleteDirection: () => AutocompleteDirection = () => "up",
 	) {
 		super(tui, editorTheme, keybindings, { paddingX: 0 });
 		this.getDynamicBorderColor = getDynamicBorderColor;
+		this.getAutocompleteDirection = getAutocompleteDirection;
 	}
 
 	override setPaddingX(_padding: number): void {
@@ -91,24 +95,28 @@ export class OpenTuiEditor extends CustomEditor {
 			: "";
 		const showSlashPrefix = /^\/\S*$/.test(textBeforeCursor);
 
-		const result: string[] = [];
-		result.push(horizontalBorder(width, borderPaint, baseLines[0]));
+		const editorLines: string[] = [];
+		editorLines.push(horizontalBorder(width, borderPaint, baseLines[0]));
 
 		for (let i = 1; i < bottomIdx; i++) {
 			const line = baseLines[i] ?? "";
 			const prefix = i === 1 && firstInputLineIsVisible
 				? `${PROMPT_RGB}❯${RESET} `
 				: " ".repeat(PROMPT_WIDTH);
-			result.push(`${prefix}${fillLine(isEditorBorderLine(line) ? "" : line, innerWidth)}`);
+			editorLines.push(`${prefix}${fillLine(isEditorBorderLine(line) ? "" : line, innerWidth)}`);
 		}
 
-		result.push(horizontalBorder(width, borderPaint, baseLines[bottomIdx]));
+		editorLines.push(horizontalBorder(width, borderPaint, baseLines[bottomIdx]));
 
+		const autocompleteLines: string[] = [];
 		for (let i = bottomIdx + 1; i < baseLines.length; i++) {
 			const autocompleteLine = paintAutocompleteLine(baseLines[i]!, showSlashPrefix);
-			result.push(`${" ".repeat(PROMPT_WIDTH)}${fillLine(autocompleteLine, innerWidth)}`);
+			autocompleteLines.push(`${" ".repeat(PROMPT_WIDTH)}${fillLine(autocompleteLine, innerWidth)}`);
 		}
 
+		const result = this.getAutocompleteDirection() === "up"
+			? [...autocompleteLines, ...editorLines]
+			: [...editorLines, ...autocompleteLines];
 		return result.map((line) => truncateToWidth(line, width, ""));
 	}
 }
@@ -117,9 +125,16 @@ export function installEditor(
 	_pi: ExtensionAPI,
 	ctx: ExtensionContext,
 	getDynamicBorderColor: () => boolean,
+	getAutocompleteDirection: () => AutocompleteDirection,
 ): () => void {
 	ctx.ui.setEditorComponent((tui, editorTheme, keybindings) =>
-		new OpenTuiEditor(tui, editorTheme, keybindings, getDynamicBorderColor),
+		new OpenTuiEditor(
+			tui,
+			editorTheme,
+			keybindings,
+			getDynamicBorderColor,
+			getAutocompleteDirection,
+		),
 	);
 	return () => {
 		ctx.ui.setEditorComponent(undefined);

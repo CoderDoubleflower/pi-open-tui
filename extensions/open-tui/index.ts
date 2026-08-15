@@ -80,7 +80,12 @@ export default function (pi: ExtensionAPI) {
 					},
 				},
 			);
-			cleanupEditor = installEditor(pi, ctx, () => config.editor.dynamicBorderColor);
+			cleanupEditor = installEditor(
+				pi,
+				ctx,
+				() => config.editor.dynamicBorderColor,
+				() => config.editor.autocompleteDirection,
+			);
 			active = true;
 		}
 	};

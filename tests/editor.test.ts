@@ -127,3 +127,32 @@ test("does not prefix autocomplete metadata or duplicate an existing slash", () 
 		"\x1b[38;2;122;122;122m/already-prefixed\x1b[0m",
 	);
 });
+
+test("places autocomplete above the editor by default and below it when configured", () => {
+	let direction: "up" | "down" = "up";
+	const editor = new OpenTuiEditor(
+		tui,
+		editorTheme,
+		{ matches: () => false } as unknown as KeybindingsManager,
+		() => false,
+		() => direction,
+	);
+	editor.setText("/");
+	const autocompleteInternals = editor as unknown as {
+		autocompleteState: object;
+		autocompleteList: { render: (width: number) => string[] };
+	};
+	autocompleteInternals.autocompleteState = {};
+	autocompleteInternals.autocompleteList = { render: () => ["→ command"] };
+
+	const upLines = editor.render(40).map(stripAnsi);
+	assert.ok(upLines.findIndex((line) => line.includes("command")) < upLines.findIndex((line) => /^─+$/.test(line)));
+
+	direction = "down";
+	const downLines = editor.render(40).map(stripAnsi);
+	const bottomBorderIndex = downLines.reduce(
+		(lastIndex, line, index) => /^─+$/.test(line) ? index : lastIndex,
+		-1,
+	);
+	assert.ok(downLines.findIndex((line) => line.includes("command")) > bottomBorderIndex);
+});

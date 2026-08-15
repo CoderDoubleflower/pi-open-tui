@@ -43,7 +43,8 @@ Run `/open-tui` to open the interactive settings UI. Configuration is stored at 
   "settingsLanguage": "en",
   "footerScript": null,
   "editor": {
-    "dynamicBorderColor": false
+    "dynamicBorderColor": false,
+    "autocompleteDirection": "up"
   },
   "icons": {
     "mode": "auto"
@@ -74,6 +75,7 @@ Run `/open-tui` to open the interactive settings UI. Configuration is stored at 
 
 - `settingsLanguage`: language for the `/open-tui` settings UI only; `en` or `zh`
 - `editor.dynamicBorderColor`: when `false` (default), editor borders use RGB `(103,103,103)`; when `true`, only the horizontal borders follow Pi's bash/thinking color
+- `editor.autocompleteDirection`: completion menu placement; `up` (default) opens above the editor and `down` opens below it
 - `icons.mode`: `auto` (detect Nerd Font), `nerd` (force Nerd Font glyphs), or `ascii` (plain fallbacks)
 - `footerSegments.sessionName`: shows the current session name next to cwd (off by default); hidden when the session has no name
 - `footerSegments.gitCommit`: shows short hash + tag on detached HEAD (off by default)

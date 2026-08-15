@@ -8,7 +8,12 @@ import {
 	type TUI,
 	Text,
 } from "@earendil-works/pi-tui";
-import type { IconMode, OpenTuiConfig, SettingsLanguage } from "./config.ts";
+import type {
+	AutocompleteDirection,
+	IconMode,
+	OpenTuiConfig,
+	SettingsLanguage,
+} from "./config.ts";
 
 interface SettingItem {
 	id: string;
@@ -28,6 +33,7 @@ const COPY = {
 		labels: {
 			enabled: "Enabled",
 			language: "Language",
+			autocompleteDirection: "Autocomplete menu",
 			iconMode: "Icon mode",
 			cwd: "CWD",
 			sessionName: "Session name",
@@ -48,6 +54,7 @@ const COPY = {
 			on: "On",
 			off: "Off",
 			languages: { en: "English", zh: "简体中文" },
+			autocompleteDirections: { up: "Open upward", down: "Open downward" },
 			icons: { auto: "Auto", nerd: "Nerd", ascii: "ASCII" },
 		},
 	},
@@ -58,6 +65,7 @@ const COPY = {
 		labels: {
 			enabled: "启用",
 			language: "语言",
+			autocompleteDirection: "补全菜单",
 			iconMode: "图标模式",
 			cwd: "当前目录",
 			sessionName: "会话名",
@@ -78,6 +86,7 @@ const COPY = {
 			on: "开启",
 			off: "关闭",
 			languages: { en: "English", zh: "简体中文" },
+			autocompleteDirections: { up: "向上弹出", down: "向下弹出" },
 			icons: { auto: "自动", nerd: "Nerd", ascii: "ASCII" },
 		},
 	},
@@ -110,6 +119,11 @@ function toggleLanguage(config: OpenTuiConfig): OpenTuiConfig {
 	return { ...config, settingsLanguage: config.settingsLanguage === "en" ? "zh" : "en" };
 }
 
+function toggleAutocompleteDirection(config: OpenTuiConfig): OpenTuiConfig {
+	const direction: AutocompleteDirection = config.editor.autocompleteDirection === "down" ? "up" : "down";
+	return { ...config, editor: { ...config.editor, autocompleteDirection: direction } };
+}
+
 function toggleTelemetry(config: OpenTuiConfig, key: keyof OpenTuiConfig["telemetry"]): OpenTuiConfig {
 	return {
 		...config,
@@ -121,6 +135,11 @@ function buildFeaturesItems(config: OpenTuiConfig, copy: SettingsCopy): SettingI
 	return [
 		{ id: "enabled", label: copy.labels.enabled, currentValue: config.enabled ? copy.values.on : copy.values.off },
 		{ id: "settingsLanguage", label: copy.labels.language, currentValue: copy.values.languages[config.settingsLanguage] },
+		{
+			id: "autocompleteDirection",
+			label: copy.labels.autocompleteDirection,
+			currentValue: copy.values.autocompleteDirections[config.editor.autocompleteDirection],
+		},
 	];
 }
 
@@ -177,6 +196,7 @@ function handleSettingChange(
 	if (tab === "features") {
 		if (itemId === "enabled") return toggleEnabled(config);
 		if (itemId === "settingsLanguage") return toggleLanguage(config);
+		if (itemId === "autocompleteDirection") return toggleAutocompleteDirection(config);
 	}
 	if (tab === "icons" && itemId === "mode") return cycleIconMode(config);
 	if (tab === "segments") {

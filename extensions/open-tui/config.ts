@@ -4,6 +4,7 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { IconMode } from "./icons.ts";
 
 export type SettingsLanguage = "en" | "zh";
+export type AutocompleteDirection = "up" | "down";
 
 export type { IconMode } from "./icons.ts";
 
@@ -36,6 +37,7 @@ export interface OpenTuiConfig {
 	footerScript: string | null;
 	editor: {
 		dynamicBorderColor: boolean;
+		autocompleteDirection: AutocompleteDirection;
 	};
 	icons: {
 		mode: IconMode;
@@ -50,6 +52,7 @@ export const DEFAULT_CONFIG: OpenTuiConfig = {
 	footerScript: null,
 	editor: {
 		dynamicBorderColor: false,
+		autocompleteDirection: "up",
 	},
 	icons: {
 		mode: "auto",
@@ -135,6 +138,9 @@ export function loadConfig(notify?: (msg: string, level: "warning" | "info") => 
 		}
 		if (typeof config.editor.dynamicBorderColor !== "boolean") {
 			config.editor.dynamicBorderColor = DEFAULT_CONFIG.editor.dynamicBorderColor;
+		}
+		if (config.editor.autocompleteDirection !== "up" && config.editor.autocompleteDirection !== "down") {
+			config.editor.autocompleteDirection = DEFAULT_CONFIG.editor.autocompleteDirection;
 		}
 		return config;
 	} catch (err) {

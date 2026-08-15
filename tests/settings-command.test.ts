@@ -182,6 +182,17 @@ test("configures the extension status line with Space", async () => {
 	assert.match(selectedLine(settings.component), /Extension status line/);
 });
 
+test("configures the autocomplete menu direction", async () => {
+	const settings = await openSettings();
+	settings.component.handleInput("\x1b[B");
+	settings.component.handleInput("\x1b[B");
+	assert.match(selectedLine(settings.component), /Autocomplete menu/);
+
+	settings.component.handleInput("\r");
+	assert.equal(settings.getConfig().editor.autocompleteDirection, "down");
+	assert.match(selectedLine(settings.component), /Open downward/);
+});
+
 test("keeps localized settings and values within narrow widths", async () => {
 	const config = structuredClone(DEFAULT_CONFIG);
 	config.settingsLanguage = "zh";
@@ -205,6 +216,24 @@ test("falls back to English for an invalid settings language", () => {
 		process.env.PI_CODING_AGENT_DIR = agentDir;
 		writeFileSync(join(agentDir, "open-tui.json"), JSON.stringify({ settingsLanguage: "de" }), "utf8");
 		assert.equal(loadConfig().settingsLanguage, "en");
+	} finally {
+		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+		rmSync(agentDir, { recursive: true, force: true });
+	}
+});
+
+test("falls back to upward autocomplete for an invalid direction", () => {
+	const agentDir = mkdtempSync(join(tmpdir(), "pi-open-tui-"));
+	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	try {
+		process.env.PI_CODING_AGENT_DIR = agentDir;
+		writeFileSync(
+			join(agentDir, "open-tui.json"),
+			JSON.stringify({ editor: { autocompleteDirection: "sideways" } }),
+			"utf8",
+		);
+		assert.equal(loadConfig().editor.autocompleteDirection, "up");
 	} finally {
 		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
 		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
