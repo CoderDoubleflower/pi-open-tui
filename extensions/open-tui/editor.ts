@@ -21,14 +21,22 @@ function fillLine(content: string, width: number): string {
 	return `${truncated}${pad}`;
 }
 
-export function paintAutocompleteLine(line: string): string {
+function isAutocompleteMetaLine(content: string): boolean {
+	return content === "No matching commands" || /^\(\d+\/\d+\)$/.test(content);
+}
+
+export function paintAutocompleteLine(line: string, showSlashPrefix = false): string {
 	const plain = stripAnsi(line);
 	const selected = plain.startsWith("→ ");
 	const color = selected
 		? AUTOCOMPLETE_SELECTED_RGB
 		: AUTOCOMPLETE_UNSELECTED_RGB;
-	const content = selected ? `  ${plain.slice(2)}` : plain;
-	return `${color}${content}${RESET}`;
+	const content = plain.slice(2);
+	let renderedContent = `  ${content}`;
+	if (showSlashPrefix && !isAutocompleteMetaLine(content)) {
+		renderedContent = content.startsWith("/") ? content : `/${content}`;
+	}
+	return `${color}${renderedContent}${RESET}`;
 }
 
 function horizontalBorder(
@@ -77,6 +85,11 @@ export class OpenTuiEditor extends CustomEditor {
 		const baseLines = super.render(innerWidth);
 		const bottomIdx = findBottomBorderIndex(baseLines);
 		const firstInputLineIsVisible = !stripAnsi(baseLines[0] ?? "").includes("↑");
+		const cursor = this.getCursor();
+		const textBeforeCursor = cursor.line === 0
+			? (this.getLines()[0] ?? "").slice(0, cursor.col).trimStart()
+			: "";
+		const showSlashPrefix = /^\/\S*$/.test(textBeforeCursor);
 
 		const result: string[] = [];
 		result.push(horizontalBorder(width, borderPaint, baseLines[0]));
@@ -92,7 +105,7 @@ export class OpenTuiEditor extends CustomEditor {
 		result.push(horizontalBorder(width, borderPaint, baseLines[bottomIdx]));
 
 		for (let i = bottomIdx + 1; i < baseLines.length; i++) {
-			const autocompleteLine = paintAutocompleteLine(baseLines[i]!);
+			const autocompleteLine = paintAutocompleteLine(baseLines[i]!, showSlashPrefix);
 			result.push(`${" ".repeat(PROMPT_WIDTH)}${fillLine(autocompleteLine, innerWidth)}`);
 		}
 

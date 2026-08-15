@@ -108,3 +108,22 @@ test("uses dedicated colors for selected and unselected autocomplete items", () 
 	assert.equal(selected, "\x1b[38;2;175;215;255m  selected\x1b[0m");
 	assert.equal(unselected, "\x1b[38;2;122;122;122m  unselected\x1b[0m");
 });
+
+test("prefixes slash-command items at the input content column", () => {
+	const selected = paintAutocompleteLine("\x1b[31m→ selected\x1b[0m", true);
+	const unselected = paintAutocompleteLine("  unselected", true);
+
+	assert.equal(selected, "\x1b[38;2;175;215;255m/selected\x1b[0m");
+	assert.equal(unselected, "\x1b[38;2;122;122;122m/unselected\x1b[0m");
+});
+
+test("does not prefix autocomplete metadata or duplicate an existing slash", () => {
+	assert.equal(
+		paintAutocompleteLine("  (1/10)", true),
+		"\x1b[38;2;122;122;122m  (1/10)\x1b[0m",
+	);
+	assert.equal(
+		paintAutocompleteLine("  /already-prefixed", true),
+		"\x1b[38;2;122;122;122m/already-prefixed\x1b[0m",
+	);
+});
