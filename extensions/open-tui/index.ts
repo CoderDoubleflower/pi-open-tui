@@ -4,10 +4,12 @@ import { installEditor } from "./editor.ts";
 import { installFooter } from "./footer.ts";
 import { installHeader } from "./header.ts";
 import { emptyGitStatus, readGitStatus } from "./git.ts";
+import { installOutputPrefixes } from "./output-prefix.ts";
 import { readRuntimeInfo } from "./runtime.ts";
 import { SessionLifecycle } from "./session-lifecycle.ts";
 import { registerSettingsCommand } from "./settings-command.ts";
 import { formatTurnTelemetry, TurnTelemetryTracker } from "./telemetry.ts";
+import { installCompactUserMessages } from "./user-message.ts";
 import {
 	createInitialState,
 	getModelMeta,
@@ -54,6 +56,8 @@ export default function (pi: ExtensionAPI) {
 	let cleanupHeader: (() => void) | undefined;
 	let cleanupFooter: (() => void) | undefined;
 	let cleanupEditor: (() => void) | undefined;
+	let cleanupUserMessages: (() => void) | undefined;
+	let cleanupOutputPrefixes: (() => void) | undefined;
 	let pendingUiChange: "install" | "uninstall" | undefined;
 
 	const getThinkingLevel = () => (sessionLifecycle.isCurrent() ? pi.getThinkingLevel() : "off");
@@ -86,6 +90,8 @@ export default function (pi: ExtensionAPI) {
 				() => config.editor.dynamicBorderColor,
 				() => config.editor.autocompleteDirection,
 			);
+			cleanupUserMessages = installCompactUserMessages();
+			cleanupOutputPrefixes = installOutputPrefixes(() => ctx.ui.theme);
 			active = true;
 		}
 	};
@@ -96,9 +102,13 @@ export default function (pi: ExtensionAPI) {
 			cleanupHeader?.();
 			cleanupFooter?.();
 			cleanupEditor?.();
+			cleanupUserMessages?.();
+			cleanupOutputPrefixes?.();
 			cleanupHeader = undefined;
 			cleanupFooter = undefined;
 			cleanupEditor = undefined;
+			cleanupUserMessages = undefined;
+			cleanupOutputPrefixes = undefined;
 			requestFooterRender = undefined;
 			active = false;
 		}
