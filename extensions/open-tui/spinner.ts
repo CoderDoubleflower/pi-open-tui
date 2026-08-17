@@ -1,7 +1,12 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { SpinnerConfig } from "./config.ts";
 import { resolveSpinnerMessage } from "./spinner-content.ts";
-import { SPINNER_MOUNTED_EVENT, SpinnerEventStore } from "./spinner-events.ts";
+import {
+	SPINNER_MOUNTED_EVENT,
+	SPINNER_UNMOUNTED_EVENT,
+	TODO_SPINNER_SOURCE,
+	SpinnerEventStore,
+} from "./spinner-events.ts";
 import {
 	detectSpinnerPlatform,
 	renderNativeSpinnerMessage,
@@ -56,6 +61,8 @@ function renderSignature(snapshot: SpinnerWidgetSnapshot): string {
 		snapshot.phase,
 		snapshot.active,
 		snapshot.message,
+		snapshot.completedDurationMs,
+		snapshot.hasAttachedTodos,
 		snapshot.reducedMotion,
 		stallBucket,
 	]);
@@ -128,6 +135,8 @@ export class SpinnerController implements SpinnerWidgetSource {
 				baseMessage,
 				suffix: config.showSuffix ? this.suffixStore.suffix : null,
 			}),
+			completedDurationMs: this.state.agentCompletedDurationMs,
+			hasAttachedTodos: this.eventStore.hasTasks(TODO_SPINNER_SOURCE),
 			reducedMotion: config.reducedMotion,
 			stalledIntensity: config.showStall ? this.state.stalledIntensity : 0,
 		};
@@ -240,6 +249,7 @@ export function installSpinner(
 			controller.dispose();
 			ctx.ui.setWidget(SPINNER_WIDGET_KEY, undefined);
 			ctx.ui.setWorkingVisible(true);
+			events.emit(SPINNER_UNMOUNTED_EVENT, { version: 1 });
 		},
 	};
 }

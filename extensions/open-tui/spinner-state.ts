@@ -27,6 +27,8 @@ export interface SpinnerRuntimeState {
 	active: boolean;
 	mode: SpinnerMode;
 	agentStartedAtMs: number | null;
+	/** Frozen elapsed time for the most recently completed agent run. */
+	agentCompletedDurationMs: number | null;
 	turnStartedAtMs: number | null;
 	randomVerb: string;
 	inputTokens: number;
@@ -68,6 +70,7 @@ export function createSpinnerRuntimeState(): SpinnerRuntimeState {
 		active: false,
 		mode: "requesting",
 		agentStartedAtMs: null,
+		agentCompletedDurationMs: null,
 		turnStartedAtMs: null,
 		randomVerb: "",
 		inputTokens: 0,
@@ -131,6 +134,10 @@ export class SpinnerStateMachine {
 	agentEnd(): void {
 		if (this.runtimeState.phase !== "running") return;
 		if (this.hasCurrentTokenUsage()) this.finalizeCurrentTokenUsage();
+		const now = this.options.clock.now();
+		this.runtimeState.agentCompletedDurationMs = this.runtimeState.agentStartedAtMs === null
+			? null
+			: Math.max(0, now - this.runtimeState.agentStartedAtMs);
 		this.runtimeState.phase = "idle";
 		this.runtimeState.active = false;
 		this.runtimeState.turnStartedAtMs = null;
