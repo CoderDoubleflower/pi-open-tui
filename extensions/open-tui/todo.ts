@@ -131,3 +131,25 @@ export function registerTodoWriteTool(pi: ExtensionAPI, controller: TodoControll
 		},
 	});
 }
+
+export function registerTodoIntegration(pi: ExtensionAPI): void {
+	const controller = new TodoController();
+	let installation: TodoInstallation | undefined;
+
+	registerTodoWriteTool(pi, controller);
+
+	pi.on("session_start", (_event, ctx) => {
+		installation?.dispose();
+		installation = undefined;
+		controller.reset();
+		if (ctx.hasUI) {
+			installation = installTodoWidget(ctx, controller);
+		}
+	});
+
+	pi.on("session_shutdown", (_event, _ctx) => {
+		installation?.dispose();
+		installation = undefined;
+		controller.reset();
+	});
+}
