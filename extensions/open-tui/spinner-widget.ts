@@ -7,6 +7,7 @@ import {
 	type SpinnerPlatform,
 } from "./spinner-render.ts";
 import type { SpinnerPhase } from "./spinner-state.ts";
+import { formatDuration } from "./utils.ts";
 
 export const SPINNER_WIDGET_KEY = "open-tui-spinner";
 export const SPINNER_WIDGET_INTERVAL_MS = 120;
@@ -15,6 +16,8 @@ export interface SpinnerWidgetSnapshot {
 	phase: SpinnerPhase;
 	active: boolean;
 	message?: string;
+	completedDurationMs: number | null;
+	hasAttachedTodos: boolean;
 	reducedMotion: boolean;
 	stalledIntensity: number;
 }
@@ -28,6 +31,10 @@ function spinnerColor(stalledIntensity: number): ThemeColor {
 	if (stalledIntensity >= 1) return "error";
 	if (stalledIntensity > 0) return "warning";
 	return "accent";
+}
+
+function withEditorGap(line: string, hasAttachedTodos: boolean): string[] {
+	return hasAttachedTodos ? [line] : [line, ""];
 }
 
 export function createSpinnerWidget(
@@ -66,14 +73,25 @@ export function createSpinnerWidget(
 			if (disposed || width <= 0) return [];
 			const snapshot = source.getWidgetSnapshot();
 			if (snapshot.phase === "hidden") return [];
-			if (snapshot.phase === "idle" || !snapshot.message) return ["", ""];
+
+			const ellipsis = theme.fg("dim", "...");
+			if (snapshot.phase === "idle") {
+				const duration = formatDuration(snapshot.completedDurationMs ?? 0);
+				const line = truncateToWidth(
+					theme.fg("dim", `✻ Worked for ${duration}`),
+					width,
+					ellipsis,
+				);
+				return withEditorGap(line, snapshot.hasAttachedTodos);
+			}
+			if (!snapshot.message) return snapshot.hasAttachedTodos ? [] : ["", ""];
 
 			const glyph = snapshot.reducedMotion
 				? "●"
 				: frames[frameIndex] ?? frames[0] ?? "·";
 			const color = spinnerColor(snapshot.stalledIntensity);
 			const line = `${theme.fg(color, glyph)} ${theme.fg("muted", snapshot.message)}`;
-			return [truncateToWidth(line, width, theme.fg("dim", "...")), ""];
+			return withEditorGap(truncateToWidth(line, width, ellipsis), snapshot.hasAttachedTodos);
 		},
 	};
 }
