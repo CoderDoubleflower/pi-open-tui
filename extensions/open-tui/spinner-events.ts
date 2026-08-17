@@ -10,6 +10,8 @@ import {
 export const SPINNER_OVERRIDE_EVENT = "open-tui:spinner:override:v1";
 export const SPINNER_TASKS_EVENT = "open-tui:spinner:tasks:v1";
 export const SPINNER_MOUNTED_EVENT = "open-tui:spinner:mounted:v1";
+export const SPINNER_UNMOUNTED_EVENT = "open-tui:spinner:unmounted:v1";
+export const TODO_SPINNER_SOURCE = "TodoWrite";
 
 export type SpinnerEventScope = "agent" | "session";
 
@@ -121,6 +123,10 @@ export class SpinnerEventStore {
 			overrideMessage: override?.message ?? null,
 			currentTask: tasks ? selectCurrentSpinnerTask(tasks.tasks) : null,
 		};
+	}
+
+	hasTasks(source: string): boolean {
+		return (this.taskSnapshots.get(source)?.tasks.length ?? 0) > 0;
 	}
 
 	agentEnd(): void {
