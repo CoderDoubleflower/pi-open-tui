@@ -4,6 +4,8 @@ import { Type } from "typebox";
 import {
 	SPINNER_MOUNTED_EVENT,
 	SPINNER_TASKS_EVENT,
+	SPINNER_UNMOUNTED_EVENT,
+	TODO_SPINNER_SOURCE,
 	type SpinnerTasksEventV1,
 } from "./spinner-events.ts";
 import {
@@ -46,8 +48,6 @@ const HIDDEN_TOOL_ROW: Component = {
 	},
 };
 
-const TODO_SPINNER_SOURCE = "TodoWrite";
-
 function cloneTodos(todos: readonly TodoItem[]): TodoItem[] {
 	return todos.map((todo) => ({ ...todo }));
 }
@@ -62,7 +62,7 @@ function isTodoWriteDetails(value: unknown): value is TodoWriteDetails {
 	return Array.isArray(details.oldTodos) && Array.isArray(details.newTodos);
 }
 
-function isSpinnerMountedEvent(value: unknown): boolean {
+function isSpinnerLifecycleEvent(value: unknown): boolean {
 	return !!value
 		&& typeof value === "object"
 		&& !Array.isArray(value)
@@ -73,6 +73,7 @@ export class TodoController implements TodoWidgetSource {
 	private todos: TodoItem[] = [];
 	private requestRender: (() => void) | undefined;
 	private revision = 0;
+	private attachedToSpinner = false;
 	private readonly events: ExtensionAPI["events"] | undefined;
 
 	constructor(events?: ExtensionAPI["events"]) {
@@ -80,11 +81,17 @@ export class TodoController implements TodoWidgetSource {
 	}
 
 	getWidgetSnapshot(): TodoWidgetSnapshot {
-		return { todos: this.todos };
+		return { todos: this.todos, attachedToSpinner: this.attachedToSpinner };
 	}
 
 	setRequestRender(requestRender: (() => void) | undefined): void {
 		this.requestRender = requestRender;
+	}
+
+	setAttachedToSpinner(attached: boolean): void {
+		if (this.attachedToSpinner === attached) return;
+		this.attachedToSpinner = attached;
+		this.requestRender?.();
 	}
 
 	getTodos(): TodoItem[] {
@@ -115,6 +122,7 @@ export class TodoController implements TodoWidgetSource {
 
 	reset(): void {
 		this.replace([]);
+		this.setAttachedToSpinner(false);
 	}
 }
 
@@ -201,11 +209,12 @@ export function registerTodoIntegration(pi: ExtensionAPI): void {
 	registerTodoWriteTool(pi, controller);
 
 	pi.events.on(SPINNER_MOUNTED_EVENT, (data) => {
-		if (!isSpinnerMountedEvent(data) || !currentCtx?.hasUI) return;
+		if (!isSpinnerLifecycleEvent(data) || !currentCtx?.hasUI) return;
 
 		// Pi keeps extension widgets in insertion order. Reinsert Todo after the
 		// spinner mounts so the visual stack matches Claude: spinner, then tasks.
 		installation?.dispose();
+		controller.setAttachedToSpinner(true);
 		installation = installTodoWidget(currentCtx, controller);
 
 		// session_start reconstruction may have happened before the spinner
@@ -213,10 +222,16 @@ export function registerTodoIntegration(pi: ExtensionAPI): void {
 		controller.publishSpinnerTasks();
 	});
 
+	pi.events.on(SPINNER_UNMOUNTED_EVENT, (data) => {
+		if (!isSpinnerLifecycleEvent(data)) return;
+		controller.setAttachedToSpinner(false);
+	});
+
 	pi.on("session_start", (_event, ctx) => {
 		currentCtx = ctx;
 		installation?.dispose();
 		installation = undefined;
+		controller.setAttachedToSpinner(false);
 		reconstructState(ctx, controller);
 		if (ctx.hasUI) installation = installTodoWidget(ctx, controller);
 	});
