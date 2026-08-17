@@ -69,9 +69,9 @@ export function createTodoWidget(
 
 			const ellipsis = theme.fg("dim", "...");
 			return [
-				"",
 				truncateToWidth(`  ${renderSummary(theme, todos)}`, width, ellipsis),
 				...todos.map((todo) => truncateToWidth(renderTodoLine(theme, todo), width, ellipsis)),
+				"",
 			];
 		},
 	};

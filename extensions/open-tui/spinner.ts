@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { SpinnerConfig } from "./config.ts";
 import { resolveSpinnerMessage } from "./spinner-content.ts";
-import { SpinnerEventStore } from "./spinner-events.ts";
+import { SPINNER_MOUNTED_EVENT, SpinnerEventStore } from "./spinner-events.ts";
 import {
 	detectSpinnerPlatform,
 	renderNativeSpinnerMessage,
@@ -229,6 +229,7 @@ export function installSpinner(
 		{ placement: "aboveEditor" },
 	);
 	controller.initialize();
+	events.emit(SPINNER_MOUNTED_EVENT, { version: 1 });
 
 	let disposed = false;
 	return {
