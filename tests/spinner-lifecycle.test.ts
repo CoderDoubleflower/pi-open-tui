@@ -165,6 +165,7 @@ test("agent state renders through the custom widget", () => {
 	assert.ok(result.renderRequests() > rendersBeforeStart);
 	assert.match(result.renderWidget()[0] ?? "", /<accent>·<\/accent>/);
 	assert.match(result.renderWidget()[0] ?? "", /Working…/);
+	assert.equal(result.renderWidget()[1], "");
 
 	controller.messageUpdate({ type: "thinking_start" });
 	assert.match(result.renderWidget()[0] ?? "", /thinking with high effort/);
@@ -291,7 +292,7 @@ test("compaction hides the widget without remounting it", () => {
 	const controller = result.installation!.controller;
 	controller.agentStart(null, false);
 	assert.equal(result.widgetCalls.length, 1);
-	assert.equal(result.renderWidget().length, 1);
+	assert.equal(result.renderWidget().length, 2);
 	controller.beforeCompact();
 	assert.equal(controller.state.active, false);
 	assert.deepEqual(result.renderWidget(), []);
