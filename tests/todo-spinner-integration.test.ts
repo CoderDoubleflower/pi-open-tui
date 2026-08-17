@@ -152,7 +152,7 @@ function setup(restoredTodos: TodoItem[] = []) {
 	};
 }
 
-test("spinner mounts above Todo and restored Todo activeForm drives spinner", () => {
+test("spinner mounts directly above connected Todo rows and restored activeForm drives it", () => {
 	const restoredTodos: TodoItem[] = [
 		{ content: "Inspect parser", status: "completed", activeForm: "Inspecting parser" },
 		{ content: "Fix parser", status: "in_progress", activeForm: "Fixing parser" },
@@ -162,16 +162,32 @@ test("spinner mounts above Todo and restored Todo activeForm drives spinner", ()
 
 	assert.deepEqual(result.widgetOrder(), [SPINNER_WIDGET_KEY, TODO_WIDGET_KEY]);
 	result.spinner.controller.agentStart(null, false);
-	assert.match(result.renderWidget(SPINNER_WIDGET_KEY)[0] ?? "", /Fixing parser…/);
-	assert.match(result.renderWidget(TODO_WIDGET_KEY).join("\n"), /Fix parser/);
-	assert.equal(result.renderWidget(TODO_WIDGET_KEY).at(-1), "");
+
+	const spinnerLines = result.renderWidget(SPINNER_WIDGET_KEY);
+	const todoLines = result.renderWidget(TODO_WIDGET_KEY);
+	assert.equal(spinnerLines.length, 1);
+	assert.match(spinnerLines[0] ?? "", /Fixing parser…/);
+	assert.match(todoLines[0] ?? "", /⎿/);
+	assert.match(todoLines[0] ?? "", /Inspect parser/);
+	assert.doesNotMatch(todoLines.join("\n"), /tasks \(/);
+	assert.equal(todoLines.at(-1), "");
+
+	result.clock.value = 12_345;
+	result.spinner.controller.agentEnd();
+	const idleLines = result.renderWidget(SPINNER_WIDGET_KEY);
+	assert.equal(idleLines.length, 1);
+	assert.match(idleLines[0] ?? "", /✻ Worked for 12s/);
+	assert.match(result.renderWidget(TODO_WIDGET_KEY)[0] ?? "", /⎿/);
+
 	result.spinner.dispose();
+	assert.match(result.renderWidget(TODO_WIDGET_KEY)[0] ?? "", /tasks \(/);
 });
 
 test("TodoWrite updates switch spinner to the current in-progress activeForm", async () => {
 	const result = setup();
 	result.spinner.controller.agentStart(null, false);
 	assert.match(result.renderWidget(SPINNER_WIDGET_KEY)[0] ?? "", /Working…/);
+	assert.equal(result.renderWidget(SPINNER_WIDGET_KEY).length, 2);
 
 	await result.registeredTodoTool().execute("todo-1", {
 		todos: [
@@ -180,6 +196,8 @@ test("TodoWrite updates switch spinner to the current in-progress activeForm", a
 		],
 	});
 	assert.match(result.renderWidget(SPINNER_WIDGET_KEY)[0] ?? "", /Implementing parser…/);
+	assert.equal(result.renderWidget(SPINNER_WIDGET_KEY).length, 1);
+	assert.match(result.renderWidget(TODO_WIDGET_KEY)[0] ?? "", /⎿/);
 
 	await result.registeredTodoTool().execute("todo-2", {
 		todos: [
@@ -196,6 +214,7 @@ test("TodoWrite updates switch spinner to the current in-progress activeForm", a
 		],
 	});
 	assert.match(result.renderWidget(SPINNER_WIDGET_KEY)[0] ?? "", /Working…/);
+	assert.equal(result.renderWidget(SPINNER_WIDGET_KEY).length, 2);
 	assert.deepEqual(result.renderWidget(TODO_WIDGET_KEY), []);
 	result.spinner.dispose();
 });
