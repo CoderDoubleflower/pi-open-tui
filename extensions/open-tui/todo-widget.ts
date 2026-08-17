@@ -36,12 +36,12 @@ function renderSummary(theme: Theme, todos: readonly TodoItem[]): string {
 function renderTodoLine(theme: Theme, todo: TodoItem): string {
 	if (todo.status === "completed") {
 		const content = theme.strikethrough(todo.content);
-		return `  ${theme.fg("success", "✓")} ${theme.fg("dim", content)}`;
+		return `  ${theme.fg("success", "✔")} ${theme.fg("dim", content)}`;
 	}
 	if (todo.status === "in_progress") {
-		return `  ${theme.fg("accent", "■")} ${theme.bold(todo.content)}`;
+		return `  ${theme.fg("accent", "◼")} ${theme.bold(todo.content)}`;
 	}
-	return `  ${theme.fg("muted", "□")} ${todo.content}`;
+	return `  ◻ ${todo.content}`;
 }
 
 export function createTodoWidget(
@@ -69,6 +69,7 @@ export function createTodoWidget(
 
 			const ellipsis = theme.fg("dim", "...");
 			return [
+				"",
 				truncateToWidth(`  ${renderSummary(theme, todos)}`, width, ellipsis),
 				...todos.map((todo) => truncateToWidth(renderTodoLine(theme, todo), width, ellipsis)),
 			];
