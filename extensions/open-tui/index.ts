@@ -1,4 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { registerClearCommand } from "./clear-command.ts";
 import { type OpenTuiConfig, DEFAULT_CONFIG, ensureConfigExists, loadConfig, saveConfig } from "./config.ts";
 import { installEditor } from "./editor.ts";
 import { installFooter } from "./footer.ts";
@@ -8,6 +9,11 @@ import { installOutputPrefixes } from "./output-prefix.ts";
 import { readRuntimeInfo } from "./runtime.ts";
 import { SessionLifecycle } from "./session-lifecycle.ts";
 import { registerSettingsCommand } from "./settings-command.ts";
+import {
+	installSpinner,
+	type SpinnerDependencies,
+	type SpinnerInstallation,
+} from "./spinner.ts";
 import { formatTurnTelemetry, TurnTelemetryTracker } from "./telemetry.ts";
 import { installCompactUserMessages } from "./user-message.ts";
 import {
@@ -43,7 +49,9 @@ function isTuiContext(ctx: ExtensionContext): boolean {
 	}
 }
 
-export default function (pi: ExtensionAPI) {
+export function registerOpenTui(pi: ExtensionAPI, spinnerDependencies?: SpinnerDependencies) {
+	registerClearCommand(pi);
+
 	const sessionLifecycle = new SessionLifecycle();
 	const state: FooterState = createInitialState();
 	const turnTelemetry = new TurnTelemetryTracker();
@@ -58,7 +66,9 @@ export default function (pi: ExtensionAPI) {
 	let cleanupEditor: (() => void) | undefined;
 	let cleanupUserMessages: (() => void) | undefined;
 	let cleanupOutputPrefixes: (() => void) | undefined;
+	let spinnerInstallation: SpinnerInstallation | undefined;
 	let pendingUiChange: "install" | "uninstall" | undefined;
+	let pendingSpinnerSync = false;
 
 	const getThinkingLevel = () => (sessionLifecycle.isCurrent() ? pi.getThinkingLevel() : "off");
 
@@ -92,13 +102,25 @@ export default function (pi: ExtensionAPI) {
 			);
 			cleanupUserMessages = installCompactUserMessages();
 			cleanupOutputPrefixes = installOutputPrefixes(() => ctx.ui.theme);
+			spinnerInstallation = installSpinner(pi.events, ctx, () => config.spinner, spinnerDependencies);
 			active = true;
+		}
+	};
+
+	const syncSpinner = (ctx: ExtensionContext) => {
+		if (!active) return;
+		if (config.spinner.enabled && !spinnerInstallation) {
+			spinnerInstallation = installSpinner(pi.events, ctx, () => config.spinner, spinnerDependencies);
+		} else if (!config.spinner.enabled && spinnerInstallation) {
+			spinnerInstallation.dispose();
+			spinnerInstallation = undefined;
 		}
 	};
 
 	const uninstallUi = (ctx: ExtensionContext) => {
 		if (!isTuiContext(ctx)) return;
 		if (active) {
+			spinnerInstallation?.dispose();
 			cleanupHeader?.();
 			cleanupFooter?.();
 			cleanupEditor?.();
@@ -109,6 +131,7 @@ export default function (pi: ExtensionAPI) {
 			cleanupEditor = undefined;
 			cleanupUserMessages = undefined;
 			cleanupOutputPrefixes = undefined;
+			spinnerInstallation = undefined;
 			requestFooterRender = undefined;
 			active = false;
 		}
@@ -158,6 +181,7 @@ export default function (pi: ExtensionAPI) {
 		stopWorkingTimer();
 		const tick = () => {
 			if (!sessionLifecycle.isCurrent() || !active) return;
+			spinnerInstallation?.controller.tick();
 			requestFooterRender?.();
 		};
 		tick();
@@ -174,6 +198,8 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("session_start", async (_event, ctx) => {
 		sessionLifecycle.start();
+		pendingUiChange = undefined;
+		pendingSpinnerSync = false;
 		lastCtx = ctx;
 		state.sessionStartEpoch = Date.now();
 		state.workingSince = undefined;
@@ -194,6 +220,8 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("session_shutdown", async (_event, ctx) => {
 		sessionLifecycle.shutdown();
+		pendingUiChange = undefined;
+		pendingSpinnerSync = false;
 		stopWorkingTimer();
 		if (active) {
 			uninstallUi(ctx);
@@ -201,16 +229,21 @@ export default function (pi: ExtensionAPI) {
 		lastCtx = undefined;
 	});
 
-	pi.on("agent_start", (event, _ctx) => {
+	pi.on("agent_start", (event, ctx) => {
 		turnTelemetry.handle(event);
 		if (!sessionLifecycle.isCurrent()) return;
 		state.workingSince = Date.now();
 		state.lastDoneIn = undefined;
+		spinnerInstallation?.controller.agentStart(
+			getThinkingLevel(),
+			ctx.model?.reasoning === true,
+		);
 		startWorkingTimer();
 	});
 
 	pi.on("agent_end", (_event, _ctx) => {
 		if (!sessionLifecycle.isCurrent()) return;
+		spinnerInstallation?.controller.agentEnd();
 		stopWorkingTimer();
 		if (state.workingSince !== undefined) {
 			state.lastDoneIn = Date.now() - state.workingSince;
@@ -221,6 +254,8 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("turn_start", (event) => {
 		turnTelemetry.handle(event);
+		if (!sessionLifecycle.isCurrent()) return;
+		spinnerInstallation?.controller.turnStart();
 	});
 
 	pi.on("message_start", (event) => {
@@ -229,10 +264,17 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("message_update", (event) => {
 		turnTelemetry.handle(event);
+		if (!sessionLifecycle.isCurrent()) return;
+		spinnerInstallation?.controller.messageUpdate(
+			event.assistantMessageEvent,
+			event.message.role === "assistant" ? event.message.usage : undefined,
+		);
 	});
 
 	pi.on("tool_execution_start", (event) => {
 		turnTelemetry.handle(event);
+		if (!sessionLifecycle.isCurrent()) return;
+		spinnerInstallation?.controller.toolExecutionStart(event.toolCallId);
 	});
 
 	pi.on("turn_end", (event) => {
@@ -251,19 +293,34 @@ export default function (pi: ExtensionAPI) {
 		refreshInteractiveState(ctx);
 	});
 
-	pi.on("thinking_level_select", (_event, ctx) => {
+	pi.on("thinking_level_select", (event, ctx) => {
+		spinnerInstallation?.controller.thinkingLevelSelect(
+			event.level,
+			ctx.model?.reasoning === true,
+		);
 		refreshInteractiveState(ctx);
 	});
 
 	pi.on("message_end", (event, ctx) => {
 		turnTelemetry.handle(event);
 		if (!sessionLifecycle.isCurrent()) return;
+		if (event.message.role === "assistant") {
+			spinnerInstallation?.controller.messageEnd(event.message.usage);
+		}
 		invalidateUsageCache();
 		refreshInteractiveState(ctx);
 	});
 
-	pi.on("tool_execution_end", (_event, ctx) => {
+	pi.on("tool_execution_end", (event, ctx) => {
+		if (!sessionLifecycle.isCurrent()) return;
+		spinnerInstallation?.controller.toolExecutionEnd(event.toolCallId);
 		refreshInteractiveState(ctx);
+	});
+
+	pi.on("session_before_compact", () => {
+		if (!sessionLifecycle.isCurrent()) return;
+		spinnerInstallation?.controller.beforeCompact();
+		stopWorkingTimer();
 	});
 
 	pi.on("session_compact", (_event, ctx) => {
@@ -282,6 +339,7 @@ export default function (pi: ExtensionAPI) {
 		getConfig: () => config,
 		onConfigChanged: (newConfig) => {
 			const wasEnabled = config.enabled;
+			const wasSpinnerEnabled = config.spinner.enabled;
 			saveConfig(newConfig);
 			config = newConfig;
 			if (lastCtx && wasEnabled !== newConfig.enabled) {
@@ -289,6 +347,11 @@ export default function (pi: ExtensionAPI) {
 				// is open, pi core's setEditorComponent() steals focus from the overlay
 				// and strands it without keyboard input.
 				pendingUiChange = newConfig.enabled ? "install" : "uninstall";
+			}
+			if (lastCtx && wasEnabled === newConfig.enabled && wasSpinnerEnabled !== newConfig.spinner.enabled) {
+				pendingSpinnerSync = true;
+			} else {
+				spinnerInstallation?.controller.refresh();
 			}
 			const gitNeeded = newConfig.footerScript !== null
 				|| newConfig.footerSegments.gitBranch
@@ -302,14 +365,24 @@ export default function (pi: ExtensionAPI) {
 			requestFooterRender?.();
 		},
 		onOverlayClosed: () => {
-			if (!lastCtx || pendingUiChange === undefined) return;
-			const change = pendingUiChange;
-			pendingUiChange = undefined;
-			if (change === "uninstall") {
-				uninstallUi(lastCtx);
-			} else {
-				applyUi(lastCtx);
+			if (!lastCtx) return;
+			if (pendingUiChange !== undefined) {
+				const change = pendingUiChange;
+				pendingUiChange = undefined;
+				pendingSpinnerSync = false;
+				if (change === "uninstall") {
+					uninstallUi(lastCtx);
+				} else {
+					applyUi(lastCtx);
+				}
+				return;
+			}
+			if (pendingSpinnerSync) {
+				pendingSpinnerSync = false;
+				syncSpinner(lastCtx);
 			}
 		},
 	});
 }
+
+export default registerOpenTui;

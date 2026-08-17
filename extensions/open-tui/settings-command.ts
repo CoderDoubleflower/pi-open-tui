@@ -13,6 +13,9 @@ import type {
 	IconMode,
 	OpenTuiConfig,
 	SettingsLanguage,
+	SpinnerEffortDisplay,
+	SpinnerTaskIntegration,
+	SpinnerVerbMode,
 } from "./config.ts";
 
 interface SettingItem {
@@ -21,20 +24,32 @@ interface SettingItem {
 	currentValue: string;
 }
 
-type Tab = "features" | "icons" | "segments" | "telemetry";
+type Tab = "features" | "icons" | "spinner" | "segments" | "telemetry";
 
-const TABS: Tab[] = ["features", "icons", "segments", "telemetry"];
+const TABS: Tab[] = ["features", "icons", "spinner", "segments", "telemetry"];
 
 const COPY = {
 	en: {
 		title: "Open TUI Settings",
-		tabs: { features: "General", icons: "Icons", segments: "Footer", telemetry: "Telemetry" },
+		tabs: { features: "General", icons: "Icons", spinner: "Spinner", segments: "Footer", telemetry: "Telemetry" },
 		hint: "Tab/Shift+Tab/←/→: tabs · ↑/↓: move · Enter/Space: change · Esc/q: close",
 		labels: {
 			enabled: "Enabled",
 			language: "Language",
 			autocompleteDirection: "Autocomplete menu",
 			iconMode: "Icon mode",
+			spinnerVerbose: "Verbose metadata",
+			reducedMotion: "Reduced motion",
+			showThinking: "Thinking status",
+			showTimer: "Elapsed timer",
+			showTokens: "Input/output tokens",
+			showStall: "Stall indication",
+			showSuffix: "External suffix",
+			effortDisplay: "Effort display",
+			taskIntegration: "Task event integration",
+			suppressFooterWorkingTimer: "Hide duplicate footer timer",
+			verbMode: "Custom verb mode",
+			customVerbs: "Custom verbs",
 			cwd: "CWD",
 			sessionName: "Session name",
 			gitBranch: "Git branch",
@@ -45,6 +60,7 @@ const COPY = {
 			tokens: "Tokens",
 			cost: "Cost",
 			extensionStatuses: "Extension status line",
+			timer: "Timer",
 			totalDuration: "Total duration",
 			tokenCounts: "Token counts",
 			stallDetails: "Stall details",
@@ -56,17 +72,33 @@ const COPY = {
 			languages: { en: "English", zh: "简体中文" },
 			autocompleteDirections: { up: "Open upward", down: "Open downward" },
 			icons: { auto: "Auto", nerd: "Nerd", ascii: "ASCII" },
+			effortDisplays: { effective: "Effective", off: "Hidden" },
+			taskIntegrations: { events: "Events", off: "Off" },
+			verbModes: { append: "Append", replace: "Replace" },
+			configured: (count: number) => `${count} configured`,
 		},
 	},
 	zh: {
 		title: "Open TUI 设置",
-		tabs: { features: "常规", icons: "图标", segments: "Footer", telemetry: "遥测" },
+		tabs: { features: "常规", icons: "图标", spinner: "Spinner", segments: "Footer", telemetry: "遥测" },
 		hint: "Tab/Shift+Tab/←/→：切页 · ↑/↓：移动 · Enter/Space：更改 · Esc/q：关闭",
 		labels: {
 			enabled: "启用",
 			language: "语言",
 			autocompleteDirection: "补全菜单",
 			iconMode: "图标模式",
+			spinnerVerbose: "详细元数据",
+			reducedMotion: "减少动态效果",
+			showThinking: "思考状态",
+			showTimer: "已用时间",
+			showTokens: "输入/输出 Token",
+			showStall: "停顿提示",
+			showSuffix: "外部后缀",
+			effortDisplay: "思考强度",
+			taskIntegration: "任务事件集成",
+			suppressFooterWorkingTimer: "隐藏重复 Footer 计时",
+			verbMode: "自定义动词模式",
+			customVerbs: "自定义动词",
 			cwd: "当前目录",
 			sessionName: "会话名",
 			gitBranch: "Git 分支",
@@ -77,6 +109,7 @@ const COPY = {
 			tokens: "Token",
 			cost: "费用",
 			extensionStatuses: "扩展状态行",
+			timer: "计时器",
 			totalDuration: "总耗时",
 			tokenCounts: "Token 数量",
 			stallDetails: "停顿详情",
@@ -88,6 +121,10 @@ const COPY = {
 			languages: { en: "English", zh: "简体中文" },
 			autocompleteDirections: { up: "向上弹出", down: "向下弹出" },
 			icons: { auto: "自动", nerd: "Nerd", ascii: "ASCII" },
+			effortDisplays: { effective: "显示当前强度", off: "隐藏" },
+			taskIntegrations: { events: "事件", off: "关闭" },
+			verbModes: { append: "追加", replace: "替换" },
+			configured: (count: number) => `已配置 ${count} 项`,
 		},
 	},
 } as const;
@@ -131,6 +168,32 @@ function toggleTelemetry(config: OpenTuiConfig, key: keyof OpenTuiConfig["teleme
 	};
 }
 
+type SpinnerBooleanKey = {
+	[K in keyof OpenTuiConfig["spinner"]]: OpenTuiConfig["spinner"][K] extends boolean ? K : never;
+}[keyof OpenTuiConfig["spinner"]];
+
+function toggleSpinner(config: OpenTuiConfig, key: SpinnerBooleanKey): OpenTuiConfig {
+	return {
+		...config,
+		spinner: { ...config.spinner, [key]: !config.spinner[key] },
+	};
+}
+
+function cycleSpinnerEffortDisplay(config: OpenTuiConfig): OpenTuiConfig {
+	const effortDisplay: SpinnerEffortDisplay = config.spinner.effortDisplay === "effective" ? "off" : "effective";
+	return { ...config, spinner: { ...config.spinner, effortDisplay } };
+}
+
+function cycleSpinnerTaskIntegration(config: OpenTuiConfig): OpenTuiConfig {
+	const taskIntegration: SpinnerTaskIntegration = config.spinner.taskIntegration === "events" ? "off" : "events";
+	return { ...config, spinner: { ...config.spinner, taskIntegration } };
+}
+
+function cycleSpinnerVerbMode(config: OpenTuiConfig): OpenTuiConfig {
+	const mode: SpinnerVerbMode = config.spinner.verbs.mode === "append" ? "replace" : "append";
+	return { ...config, spinner: { ...config.spinner, verbs: { ...config.spinner.verbs, mode } } };
+}
+
 function buildFeaturesItems(config: OpenTuiConfig, copy: SettingsCopy): SettingItem[] {
 	return [
 		{ id: "enabled", label: copy.labels.enabled, currentValue: config.enabled ? copy.values.on : copy.values.off },
@@ -147,6 +210,46 @@ function buildIconsItems(config: OpenTuiConfig, copy: SettingsCopy): SettingItem
 	return [{ id: "mode", label: copy.labels.iconMode, currentValue: copy.values.icons[config.icons.mode] }];
 }
 
+function buildSpinnerItems(config: OpenTuiConfig, copy: SettingsCopy): SettingItem[] {
+	const spinner = config.spinner;
+	const flag = (value: boolean) => value ? copy.values.on : copy.values.off;
+	return [
+		{ id: "enabled", label: copy.labels.enabled, currentValue: flag(spinner.enabled) },
+		{ id: "verbose", label: copy.labels.spinnerVerbose, currentValue: flag(spinner.verbose) },
+		{ id: "reducedMotion", label: copy.labels.reducedMotion, currentValue: flag(spinner.reducedMotion) },
+		{ id: "showThinking", label: copy.labels.showThinking, currentValue: flag(spinner.showThinking) },
+		{ id: "showTimer", label: copy.labels.showTimer, currentValue: flag(spinner.showTimer) },
+		{ id: "showTokens", label: copy.labels.showTokens, currentValue: flag(spinner.showTokens) },
+		{ id: "showStall", label: copy.labels.showStall, currentValue: flag(spinner.showStall) },
+		{ id: "showSuffix", label: copy.labels.showSuffix, currentValue: flag(spinner.showSuffix) },
+		{
+			id: "effortDisplay",
+			label: copy.labels.effortDisplay,
+			currentValue: copy.values.effortDisplays[spinner.effortDisplay],
+		},
+		{
+			id: "taskIntegration",
+			label: copy.labels.taskIntegration,
+			currentValue: copy.values.taskIntegrations[spinner.taskIntegration],
+		},
+		{
+			id: "suppressFooterWorkingTimer",
+			label: copy.labels.suppressFooterWorkingTimer,
+			currentValue: flag(spinner.suppressFooterWorkingTimer),
+		},
+		{
+			id: "verbMode",
+			label: copy.labels.verbMode,
+			currentValue: copy.values.verbModes[spinner.verbs.mode],
+		},
+		{
+			id: "customVerbs",
+			label: copy.labels.customVerbs,
+			currentValue: copy.values.configured(spinner.verbs.values.length),
+		},
+	];
+}
+
 function buildSegmentsItems(config: OpenTuiConfig, copy: SettingsCopy): SettingItem[] {
 	const segs = config.footerSegments;
 	const flag = (value: boolean) => value ? copy.values.on : copy.values.off;
@@ -161,6 +264,7 @@ function buildSegmentsItems(config: OpenTuiConfig, copy: SettingsCopy): SettingI
 		{ id: "tokens", label: copy.labels.tokens, currentValue: flag(segs.tokens) },
 		{ id: "cost", label: copy.labels.cost, currentValue: flag(segs.cost) },
 		{ id: "extensionStatuses", label: copy.labels.extensionStatuses, currentValue: flag(segs.extensionStatuses) },
+		{ id: "timer", label: copy.labels.timer, currentValue: flag(segs.timer) },
 	];
 }
 
@@ -183,6 +287,7 @@ function buildItems(tab: Tab, config: OpenTuiConfig): SettingItem[] {
 	switch (tab) {
 		case "features": return buildFeaturesItems(config, copy);
 		case "icons": return buildIconsItems(config, copy);
+		case "spinner": return buildSpinnerItems(config, copy);
 		case "segments": return buildSegmentsItems(config, copy);
 		case "telemetry": return buildTelemetryItems(config, copy);
 	}
@@ -199,6 +304,13 @@ function handleSettingChange(
 		if (itemId === "autocompleteDirection") return toggleAutocompleteDirection(config);
 	}
 	if (tab === "icons" && itemId === "mode") return cycleIconMode(config);
+	if (tab === "spinner") {
+		if (itemId === "effortDisplay") return cycleSpinnerEffortDisplay(config);
+		if (itemId === "taskIntegration") return cycleSpinnerTaskIntegration(config);
+		if (itemId === "verbMode") return cycleSpinnerVerbMode(config);
+		if (itemId === "customVerbs") return config;
+		return toggleSpinner(config, itemId as SpinnerBooleanKey);
+	}
 	if (tab === "segments") {
 		return toggleSetting(config, itemId as keyof OpenTuiConfig["footerSegments"]);
 	}

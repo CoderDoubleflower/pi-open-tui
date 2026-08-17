@@ -26,7 +26,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node --test tests/settings-command.test.ts tests/footer.test.ts tests/footer-script.test.ts tests/editor.test.ts tests/user-message.test.ts tests/output-prefix.test.ts tests/telemetry.test.ts tests/theme.test.ts",
+    "test": "node --test tests/clear-command.test.ts tests/settings-command.test.ts tests/footer.test.ts tests/footer-script.test.ts tests/editor.test.ts tests/user-message.test.ts tests/output-prefix.test.ts tests/telemetry.test.ts tests/theme.test.ts tests/spinner-config.test.ts tests/spinner-content.test.ts tests/spinner-events.test.ts tests/spinner-suffix.test.ts tests/spinner-state.test.ts tests/spinner-render.test.ts tests/spinner-lifecycle.test.ts tests/spinner-native-performance.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "pi": {

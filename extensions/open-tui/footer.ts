@@ -277,7 +277,13 @@ export function installFooter(
 					const runtimeSeg = renderRuntimeSegment(theme, state.runtime, config.icons.mode);
 					if (runtimeSeg) leftParts.push({ text: runtimeSeg, priority: 4 });
 				}
-				const timerSeg = renderTimerSegment(theme, state, glyphs);
+				const suppressWorkingTimer = state.workingSince !== undefined
+					&& config.spinner.enabled
+					&& config.spinner.showTimer
+					&& config.spinner.suppressFooterWorkingTimer;
+				const timerSeg = segments.timer && !suppressWorkingTimer
+					? renderTimerSegment(theme, state, glyphs)
+					: "";
 				if (timerSeg) leftParts.push({ text: timerSeg, priority: 1 });
 
 				// The context bar competes with the left segments for the same row:

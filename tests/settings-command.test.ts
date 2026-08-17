@@ -5,7 +5,12 @@ import { join } from "node:path";
 import test from "node:test";
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { visibleWidth, type Component, type KeybindingsManager, type TUI } from "@earendil-works/pi-tui";
-import { DEFAULT_CONFIG, loadConfig, type OpenTuiConfig } from "../extensions/open-tui/config.ts";
+import {
+	DEFAULT_CONFIG,
+	loadConfig,
+	saveConfig,
+	type OpenTuiConfig,
+} from "../extensions/open-tui/config.ts";
 import { registerSettingsCommand } from "../extensions/open-tui/settings-command.ts";
 
 interface SettingsComponent extends Component {
@@ -109,6 +114,7 @@ test("keeps the changed setting selected", async () => {
 
 	settings.component.handleInput("\t");
 	settings.component.handleInput("\t");
+	settings.component.handleInput("\t");
 	settings.component.handleInput("\x1b[B");
 	settings.component.handleInput("\x1b[B");
 	assert.match(selectedLine(settings.component), /Git branch/);
@@ -123,8 +129,10 @@ test("remembers the selection for each tab", async () => {
 
 	settings.component.handleInput("\t");
 	settings.component.handleInput("\t");
+	settings.component.handleInput("\t");
 	settings.component.handleInput("\x1b[B");
 	settings.component.handleInput("\x1b[B");
+	settings.component.handleInput("\t");
 	settings.component.handleInput("\t");
 	settings.component.handleInput("\t");
 	settings.component.handleInput("\t");
@@ -136,6 +144,7 @@ test("remembers the selection for each tab", async () => {
 test("configures telemetry from its own tab", async () => {
 	const settings = await openSettings();
 
+	settings.component.handleInput("\t");
 	settings.component.handleInput("\t");
 	settings.component.handleInput("\t");
 	settings.component.handleInput("\t");
@@ -172,6 +181,7 @@ test("supports localized settings and keyboard shortcuts", async () => {
 
 test("configures the extension status line with Space", async () => {
 	const settings = await openSettings();
+	settings.component.handleInput("\x1b[C");
 	settings.component.handleInput("\x1b[C");
 	settings.component.handleInput("\x1b[C");
 	for (let i = 0; i < 9; i++) settings.component.handleInput("\x1b[B");
@@ -239,4 +249,160 @@ test("falls back to upward autocomplete for an invalid direction", () => {
 		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
 		rmSync(agentDir, { recursive: true, force: true });
 	}
+});
+
+test("adds default spinner settings to older config files", () => {
+	const agentDir = mkdtempSync(join(tmpdir(), "pi-open-tui-"));
+	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	try {
+		process.env.PI_CODING_AGENT_DIR = agentDir;
+		writeFileSync(
+			join(agentDir, "open-tui.json"),
+			JSON.stringify({ editor: { dynamicBorderColor: true } }),
+			"utf8",
+		);
+		const config = loadConfig();
+		assert.deepEqual(config.spinner, DEFAULT_CONFIG.spinner);
+		assert.equal(config.editor.dynamicBorderColor, true);
+	} finally {
+		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+		rmSync(agentDir, { recursive: true, force: true });
+	}
+});
+
+test("validates spinner booleans without replacing other config sections", () => {
+	const agentDir = mkdtempSync(join(tmpdir(), "pi-open-tui-"));
+	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	try {
+		process.env.PI_CODING_AGENT_DIR = agentDir;
+		writeFileSync(
+			join(agentDir, "open-tui.json"),
+			JSON.stringify({
+				spinner: { enabled: "yes", verbose: true, reducedMotion: 1 },
+				editor: { autocompleteDirection: "down" },
+				footerSegments: { sessionName: true },
+				telemetry: { enabled: false },
+			}),
+			"utf8",
+		);
+		const config = loadConfig();
+		assert.deepEqual(config.spinner, {
+			...DEFAULT_CONFIG.spinner,
+			verbose: true,
+		});
+		assert.equal(config.editor.autocompleteDirection, "down");
+		assert.equal(config.footerSegments.sessionName, true);
+		assert.equal(config.telemetry.enabled, false);
+	} finally {
+		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+		rmSync(agentDir, { recursive: true, force: true });
+	}
+});
+
+test("ignores an invalid spinner object without replacing other config sections", () => {
+	const agentDir = mkdtempSync(join(tmpdir(), "pi-open-tui-"));
+	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	try {
+		process.env.PI_CODING_AGENT_DIR = agentDir;
+		writeFileSync(
+			join(agentDir, "open-tui.json"),
+			JSON.stringify({ spinner: null, editor: { dynamicBorderColor: true } }),
+			"utf8",
+		);
+		const config = loadConfig();
+		assert.deepEqual(config.spinner, DEFAULT_CONFIG.spinner);
+		assert.equal(config.editor.dynamicBorderColor, true);
+	} finally {
+		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+		rmSync(agentDir, { recursive: true, force: true });
+	}
+});
+
+test("preserves spinner settings through save and load", () => {
+	const agentDir = mkdtempSync(join(tmpdir(), "pi-open-tui-"));
+	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	try {
+		process.env.PI_CODING_AGENT_DIR = agentDir;
+		const config = structuredClone(DEFAULT_CONFIG);
+		Object.assign(config.spinner, { enabled: true, verbose: true, reducedMotion: true });
+		saveConfig(config);
+		assert.deepEqual(loadConfig(), config);
+	} finally {
+		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+		rmSync(agentDir, { recursive: true, force: true });
+	}
+});
+
+test("configures Phase 2 spinner options from their own tab", async () => {
+	const config = structuredClone(DEFAULT_CONFIG);
+	config.spinner.verbs.values = ["Inspecting", "Testing"];
+	const settings = await openSettings(config);
+
+	settings.component.handleInput("\t");
+	settings.component.handleInput("\t");
+	assert.match(settings.component.render(80).join("\n"), /\[Spinner\]/);
+	assert.match(selectedLine(settings.component), /Enabled/);
+
+	settings.component.handleInput("\r");
+	assert.equal(settings.getConfig().spinner.enabled, true);
+	for (const [key, expected] of [
+		["verbose", true],
+		["reducedMotion", true],
+		["showThinking", false],
+		["showTimer", false],
+		["showTokens", false],
+		["showStall", false],
+		["showSuffix", false],
+	] as const) {
+		settings.component.handleInput("\x1b[B");
+		settings.component.handleInput("\r");
+		assert.equal(settings.getConfig().spinner[key], expected);
+	}
+
+	settings.component.handleInput("\x1b[B");
+	settings.component.handleInput("\r");
+	assert.equal(settings.getConfig().spinner.effortDisplay, "off");
+	settings.component.handleInput("\x1b[B");
+	settings.component.handleInput("\r");
+	assert.equal(settings.getConfig().spinner.taskIntegration, "off");
+	settings.component.handleInput("\x1b[B");
+	settings.component.handleInput("\r");
+	assert.equal(settings.getConfig().spinner.suppressFooterWorkingTimer, false);
+	settings.component.handleInput("\x1b[B");
+	settings.component.handleInput("\r");
+	assert.equal(settings.getConfig().spinner.verbs.mode, "replace");
+	settings.component.handleInput("\x1b[B");
+	assert.match(settings.component.render(80).join("\n"), /2 configured/);
+});
+
+test("shows localized spinner copy within narrow widths", async () => {
+	const config = structuredClone(DEFAULT_CONFIG);
+	config.settingsLanguage = "zh";
+	config.spinner.verbs.values = ["检查"];
+	const settings = await openSettings(config);
+	settings.component.handleInput("\t");
+	settings.component.handleInput("\t");
+	for (let i = 0; i < 12; i++) settings.component.handleInput("\x1b[B");
+
+	let widestOutput = "";
+	for (const width of [24, 36, 48]) {
+		const lines = settings.component.render(width);
+		assert.ok(lines.every((line) => visibleWidth(line) <= width));
+		if (width === 48) widestOutput = lines.join("\n");
+	}
+	assert.match(widestOutput, /自定义动词/);
+	assert.match(widestOutput, /已配置 1 项/);
+});
+
+test("shows only the supported Phase 3 suffix setting", async () => {
+	const settings = await openSettings();
+	settings.component.handleInput("\t");
+	settings.component.handleInput("\t");
+	const output = settings.component.render(120).join("\n");
+	assert.match(output, /External suffix/);
+	assert.doesNotMatch(output, /Glimmer|Shimmer|Tool-use flash|Tips|Target|Brief|Connection|Background/);
 });

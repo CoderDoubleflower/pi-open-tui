@@ -417,3 +417,85 @@ test("configured footer script takes precedence over built-in segments", async (
 		rmSync(dir, { recursive: true, force: true });
 	}
 });
+
+function renderFooterTimer(configure: (config: typeof DEFAULT_CONFIG) => void, state: FooterState): string {
+	let footerFactory: NonNullable<Parameters<ExtensionContext["ui"]["setFooter"]>[0]> | undefined;
+	const ctx = {
+		model: { provider: "openai", contextWindow: 1_000 },
+		ui: {
+			setFooter(factory: typeof footerFactory) {
+				footerFactory = factory;
+			},
+		},
+		sessionManager: {
+			getCwd: () => "/work/project",
+			getEntries: () => [],
+			getSessionName: () => undefined,
+		},
+		getContextUsage: () => ({ tokens: 0, contextWindow: 1_000, percent: 0 }),
+	} as unknown as ExtensionContext;
+	const config = structuredClone(DEFAULT_CONFIG);
+	config.icons.mode = "ascii";
+	configure(config);
+	installFooter(
+		ctx,
+		() => state,
+		() => config,
+		() => ({ provider: "OpenAI", model: "gpt-5", effort: "off" }),
+		{ setRequestRender() {}, scheduleGitRefresh() {} },
+	);
+	assert.ok(footerFactory);
+	const footerData = {
+		onBranchChange: () => () => {},
+		getExtensionStatuses: () => new Map(),
+	} as unknown as ReadonlyFooterDataProvider;
+	const component = footerFactory(
+		{ requestRender() {} } as TUI,
+		theme,
+		footerData,
+	) as Component;
+	return component.render(160).join("\n");
+}
+
+test("footer keeps its working timer unless native spinner timer suppresses it", () => {
+	const state: FooterState = {
+		git: emptyGitStatus(),
+		runtime: null,
+		sessionStartEpoch: Date.now(),
+		workingSince: Date.now() - 2_000,
+		lastDoneIn: undefined,
+	};
+	assert.match(renderFooterTimer(() => {}, state), /working/);
+	assert.match(renderFooterTimer((config) => {
+		config.spinner.enabled = true;
+		config.spinner.showTimer = false;
+	}, state), /working/);
+	assert.match(renderFooterTimer((config) => {
+		config.spinner.enabled = true;
+		config.spinner.suppressFooterWorkingTimer = false;
+	}, state), /working/);
+	assert.doesNotMatch(renderFooterTimer((config) => {
+		config.spinner.enabled = true;
+	}, state), /working/);
+});
+
+test("footer timer segment hides both states while spinner suppression keeps done duration", () => {
+	const doneState: FooterState = {
+		git: emptyGitStatus(),
+		runtime: null,
+		sessionStartEpoch: Date.now(),
+		workingSince: undefined,
+		lastDoneIn: 2_000,
+	};
+	assert.match(renderFooterTimer((config) => {
+		config.spinner.enabled = true;
+	}, doneState), /done/);
+	assert.doesNotMatch(renderFooterTimer((config) => {
+		config.footerSegments.timer = false;
+	}, doneState), /done/);
+
+	const workingState = { ...doneState, workingSince: Date.now() - 2_000, lastDoneIn: undefined };
+	assert.doesNotMatch(renderFooterTimer((config) => {
+		config.footerSegments.timer = false;
+	}, workingState), /working/);
+});
