@@ -9,6 +9,7 @@ import {
 
 export const SPINNER_OVERRIDE_EVENT = "open-tui:spinner:override:v1";
 export const SPINNER_TASKS_EVENT = "open-tui:spinner:tasks:v1";
+export const SPINNER_MOUNTED_EVENT = "open-tui:spinner:mounted:v1";
 
 export type SpinnerEventScope = "agent" | "session";
 
