@@ -3,7 +3,6 @@ import type { SpinnerConfig } from "./config.ts";
 import { resolveSpinnerMessage } from "./spinner-content.ts";
 import { SpinnerEventStore } from "./spinner-events.ts";
 import {
-	createNativeSpinnerIndicator,
 	detectSpinnerPlatform,
 	renderNativeSpinnerMessage,
 	type SpinnerEnvironment,
@@ -18,6 +17,12 @@ import {
 } from "./spinner-state.ts";
 import { SpinnerSuffixStore } from "./spinner-suffix.ts";
 import { resolveSpinnerVerbs } from "./spinner-verbs.ts";
+import {
+	createSpinnerWidget,
+	SPINNER_WIDGET_KEY,
+	type SpinnerWidgetSnapshot,
+	type SpinnerWidgetSource,
+} from "./spinner-widget.ts";
 
 export interface SpinnerDependencies {
 	clock: SpinnerClock;
@@ -45,28 +50,35 @@ function effortValue(level: string | null, reasoning: boolean): string | null {
 	return reasoning && level && level !== "off" ? level : null;
 }
 
-export class SpinnerController {
+function renderSignature(snapshot: SpinnerWidgetSnapshot): string {
+	const stallBucket = snapshot.stalledIntensity >= 1 ? 2 : snapshot.stalledIntensity > 0 ? 1 : 0;
+	return JSON.stringify([
+		snapshot.active,
+		snapshot.message,
+		snapshot.reducedMotion,
+		stallBucket,
+	]);
+}
+
+export class SpinnerController implements SpinnerWidgetSource {
 	readonly stateMachine: SpinnerStateMachine;
-	private readonly ctx: ExtensionContext;
 	private readonly getConfig: () => SpinnerConfig;
 	private readonly dependencies: SpinnerDependencies;
-	private readonly platform: SpinnerPlatform;
+	private readonly spinnerPlatform: SpinnerPlatform;
 	private readonly eventStore: SpinnerEventStore;
 	private readonly suffixStore: SpinnerSuffixStore;
-	private lastMessage: string | undefined;
-	private lastIndicator = "";
+	private requestRender: (() => void) | undefined;
+	private lastRenderSignature = "";
 	private disposed = false;
 
 	constructor(
 		events: ExtensionAPI["events"],
-		ctx: ExtensionContext,
 		getConfig: () => SpinnerConfig,
 		dependencies: SpinnerDependencies,
 	) {
-		this.ctx = ctx;
 		this.getConfig = getConfig;
 		this.dependencies = dependencies;
-		this.platform = detectSpinnerPlatform(dependencies.environment);
+		this.spinnerPlatform = detectSpinnerPlatform(dependencies.environment);
 		this.eventStore = new SpinnerEventStore(events, () => this.refresh());
 		this.suffixStore = new SpinnerSuffixStore(events, () => this.refresh());
 		this.stateMachine = new SpinnerStateMachine({
@@ -80,14 +92,48 @@ export class SpinnerController {
 		return this.stateMachine.state;
 	}
 
+	get platform(): SpinnerPlatform {
+		return this.spinnerPlatform;
+	}
+
 	initialize(): void {
-		this.publishIndicator();
+		this.publish();
+	}
+
+	setRequestRender(requestRender: (() => void) | undefined): void {
+		if (this.disposed && requestRender) return;
+		this.requestRender = requestRender;
+		if (requestRender) {
+			this.lastRenderSignature = "";
+			this.publish();
+		}
+	}
+
+	getWidgetSnapshot(): SpinnerWidgetSnapshot {
+		const config = this.getConfig();
+		const content = this.eventStore.content;
+		const baseMessage = resolveSpinnerMessage({
+			overrideMessage: content.overrideMessage,
+			currentTask: config.taskIntegration === "events" ? content.currentTask : null,
+			randomVerb: this.state.randomVerb,
+		});
+		return {
+			active: this.state.active,
+			message: renderNativeSpinnerMessage({
+				state: this.state,
+				config,
+				nowMs: this.dependencies.clock.now(),
+				baseMessage,
+				suffix: config.showSuffix ? this.suffixStore.suffix : null,
+			}),
+			reducedMotion: config.reducedMotion,
+			stalledIntensity: config.showStall ? this.state.stalledIntensity : 0,
+		};
 	}
 
 	agentStart(level: string | null, reasoning: boolean): void {
 		if (this.disposed) return;
 		this.stateMachine.agentStart(effortValue(level, reasoning));
-		this.lastMessage = undefined;
 		this.publish();
 	}
 
@@ -96,8 +142,7 @@ export class SpinnerController {
 		this.stateMachine.agentEnd();
 		this.eventStore.agentEnd();
 		this.suffixStore.agentEnd();
-		this.lastMessage = undefined;
-		this.publishIndicator();
+		this.publish();
 	}
 
 	turnStart(): void {
@@ -143,10 +188,9 @@ export class SpinnerController {
 		this.stateMachine.agentEnd();
 		this.eventStore.dispose();
 		this.suffixStore.dispose();
-		this.ctx.ui.setWorkingMessage();
-		this.ctx.ui.setWorkingIndicator();
-		this.lastMessage = undefined;
-		this.lastIndicator = "";
+		this.requestRender?.();
+		this.requestRender = undefined;
+		this.lastRenderSignature = "";
 	}
 
 	private update(change: () => void): void {
@@ -156,42 +200,10 @@ export class SpinnerController {
 	}
 
 	private publish(): void {
-		this.publishMessage();
-		this.publishIndicator();
-	}
-
-	private publishMessage(): void {
-		const config = this.getConfig();
-		const content = this.eventStore.content;
-		const baseMessage = resolveSpinnerMessage({
-			overrideMessage: content.overrideMessage,
-			currentTask: config.taskIntegration === "events" ? content.currentTask : null,
-			randomVerb: this.state.randomVerb,
-		});
-		const message = renderNativeSpinnerMessage({
-			state: this.state,
-			config,
-			nowMs: this.dependencies.clock.now(),
-			baseMessage,
-			suffix: config.showSuffix ? this.suffixStore.suffix : null,
-		});
-		if (message === undefined || message === this.lastMessage) return;
-		this.lastMessage = message;
-		this.ctx.ui.setWorkingMessage(message);
-	}
-
-	private publishIndicator(): void {
-		const config = this.getConfig();
-		const indicator = createNativeSpinnerIndicator(
-			this.platform,
-			config.reducedMotion,
-			config.showStall ? this.state.stalledIntensity : 0,
-			this.ctx.ui.theme,
-		);
-		const signature = JSON.stringify(indicator);
-		if (signature === this.lastIndicator) return;
-		this.lastIndicator = signature;
-		this.ctx.ui.setWorkingIndicator(indicator);
+		const signature = renderSignature(this.getWidgetSnapshot());
+		if (signature === this.lastRenderSignature) return;
+		this.lastRenderSignature = signature;
+		this.requestRender?.();
 	}
 }
 
@@ -203,7 +215,13 @@ export function installSpinner(
 ): SpinnerInstallation | undefined {
 	if (!getConfig().enabled) return undefined;
 
-	const controller = new SpinnerController(events, ctx, getConfig, dependencies);
+	const controller = new SpinnerController(events, getConfig, dependencies);
+	ctx.ui.setWorkingVisible(false);
+	ctx.ui.setWidget(
+		SPINNER_WIDGET_KEY,
+		(tui, theme) => createSpinnerWidget(tui, theme, controller.platform, controller),
+		{ placement: "aboveEditor" },
+	);
 	controller.initialize();
 
 	let disposed = false;
@@ -213,6 +231,8 @@ export function installSpinner(
 			if (disposed) return;
 			disposed = true;
 			controller.dispose();
+			ctx.ui.setWidget(SPINNER_WIDGET_KEY, undefined);
+			ctx.ui.setWorkingVisible(true);
 		},
 	};
 }
