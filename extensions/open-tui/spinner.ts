@@ -50,6 +50,16 @@ function effortValue(level: string | null, reasoning: boolean): string | null {
 	return reasoning && level && level !== "off" ? level : null;
 }
 
+function renderSignature(snapshot: SpinnerWidgetSnapshot): string {
+	const stallBucket = snapshot.stalledIntensity >= 1 ? 2 : snapshot.stalledIntensity > 0 ? 1 : 0;
+	return JSON.stringify([
+		snapshot.active,
+		snapshot.message,
+		snapshot.reducedMotion,
+		stallBucket,
+	]);
+}
+
 export class SpinnerController implements SpinnerWidgetSource {
 	readonly stateMachine: SpinnerStateMachine;
 	private readonly getConfig: () => SpinnerConfig;
@@ -58,6 +68,7 @@ export class SpinnerController implements SpinnerWidgetSource {
 	private readonly eventStore: SpinnerEventStore;
 	private readonly suffixStore: SpinnerSuffixStore;
 	private requestRender: (() => void) | undefined;
+	private lastRenderSignature = "";
 	private disposed = false;
 
 	constructor(
@@ -92,6 +103,10 @@ export class SpinnerController implements SpinnerWidgetSource {
 	setRequestRender(requestRender: (() => void) | undefined): void {
 		if (this.disposed && requestRender) return;
 		this.requestRender = requestRender;
+		if (requestRender) {
+			this.lastRenderSignature = "";
+			this.publish();
+		}
 	}
 
 	getWidgetSnapshot(): SpinnerWidgetSnapshot {
@@ -175,6 +190,7 @@ export class SpinnerController implements SpinnerWidgetSource {
 		this.suffixStore.dispose();
 		this.requestRender?.();
 		this.requestRender = undefined;
+		this.lastRenderSignature = "";
 	}
 
 	private update(change: () => void): void {
@@ -184,6 +200,9 @@ export class SpinnerController implements SpinnerWidgetSource {
 	}
 
 	private publish(): void {
+		const signature = renderSignature(this.getWidgetSnapshot());
+		if (signature === this.lastRenderSignature) return;
+		this.lastRenderSignature = signature;
 		this.requestRender?.();
 	}
 }
