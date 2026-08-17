@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
-import { Type, type Static } from "typebox";
+import type { Component } from "@earendil-works/pi-tui";
+import { Type } from "typebox";
 import {
 	createTodoWidget,
 	TODO_WIDGET_KEY,
@@ -29,15 +29,30 @@ const TodoWriteParameters = Type.Object(
 	{ additionalProperties: false },
 );
 
-type TodoWriteInput = Static<typeof TodoWriteParameters>;
-
 export interface TodoWriteDetails {
 	oldTodos: TodoItem[];
 	newTodos: TodoItem[];
 }
 
+const HIDDEN_TOOL_ROW: Component = {
+	invalidate() {},
+	render() {
+		return [];
+	},
+};
+
 function cloneTodos(todos: readonly TodoItem[]): TodoItem[] {
 	return todos.map((todo) => ({ ...todo }));
+}
+
+function storedTodosFromSubmitted(todos: readonly TodoItem[]): TodoItem[] {
+	return todos.every((todo) => todo.status === "completed") ? [] : cloneTodos(todos);
+}
+
+function isTodoWriteDetails(value: unknown): value is TodoWriteDetails {
+	if (!value || typeof value !== "object") return false;
+	const details = value as Partial<TodoWriteDetails>;
+	return Array.isArray(details.oldTodos) && Array.isArray(details.newTodos);
 }
 
 export class TodoController implements TodoWidgetSource {
@@ -62,9 +77,7 @@ export class TodoController implements TodoWidgetSource {
 	}
 
 	reset(): void {
-		if (this.todos.length === 0) return;
-		this.todos = [];
-		this.requestRender?.();
+		this.replace([]);
 	}
 }
 
@@ -87,6 +100,18 @@ export function installTodoWidget(ctx: ExtensionContext, controller: TodoControl
 	};
 }
 
+function reconstructState(ctx: ExtensionContext, controller: TodoController): void {
+	let restored: TodoItem[] = [];
+	for (const entry of ctx.sessionManager.getBranch()) {
+		if (entry.type !== "message") continue;
+		const message = entry.message;
+		if (message.role !== "toolResult" || message.toolName !== "TodoWrite") continue;
+		if (!isTodoWriteDetails(message.details)) continue;
+		restored = storedTodosFromSubmitted(message.details.newTodos);
+	}
+	controller.replace(restored);
+}
+
 export function registerTodoWriteTool(pi: ExtensionAPI, controller: TodoController): void {
 	pi.registerTool({
 		name: "TodoWrite",
@@ -101,14 +126,13 @@ export function registerTodoWriteTool(pi: ExtensionAPI, controller: TodoControll
 		],
 		parameters: TodoWriteParameters,
 		renderShell: "self",
-		async execute(_toolCallId, input: TodoWriteInput) {
+		async execute(_toolCallId, input) {
 			const oldTodos = controller.getTodos();
 			const submittedTodos = cloneTodos(input.todos);
-			const allDone = submittedTodos.every((todo) => todo.status === "completed");
 
 			// Claude Code clears the stored list after an all-completed write while
 			// returning the submitted completed list in the tool result.
-			controller.replace(allDone ? [] : submittedTodos);
+			controller.replace(storedTodosFromSubmitted(submittedTodos));
 
 			return {
 				content: [
@@ -124,10 +148,10 @@ export function registerTodoWriteTool(pi: ExtensionAPI, controller: TodoControll
 			};
 		},
 		renderCall() {
-			return new Text("", 0, 0);
+			return HIDDEN_TOOL_ROW;
 		},
 		renderResult() {
-			return new Text("", 0, 0);
+			return HIDDEN_TOOL_ROW;
 		},
 	});
 }
@@ -141,13 +165,15 @@ export function registerTodoIntegration(pi: ExtensionAPI): void {
 	pi.on("session_start", (_event, ctx) => {
 		installation?.dispose();
 		installation = undefined;
-		controller.reset();
-		if (ctx.hasUI) {
-			installation = installTodoWidget(ctx, controller);
-		}
+		reconstructState(ctx, controller);
+		if (ctx.hasUI) installation = installTodoWidget(ctx, controller);
 	});
 
-	pi.on("session_shutdown", (_event, _ctx) => {
+	pi.on("session_tree", (_event, ctx) => {
+		reconstructState(ctx, controller);
+	});
+
+	pi.on("session_shutdown", () => {
 		installation?.dispose();
 		installation = undefined;
 		controller.reset();
