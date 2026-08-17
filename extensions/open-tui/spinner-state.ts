@@ -10,6 +10,7 @@ export type SpinnerMode =
 	| "tool-input"
 	| "tool-use";
 
+export type SpinnerPhase = "hidden" | "running" | "idle";
 export type ThinkingPhase = "none" | "thinking" | "holding-thinking" | "thought";
 
 export interface SpinnerClock {
@@ -21,6 +22,8 @@ export interface SpinnerRandom {
 }
 
 export interface SpinnerRuntimeState {
+	phase: SpinnerPhase;
+	/** Backward-compatible running flag. Prefer phase for visibility decisions. */
 	active: boolean;
 	mode: SpinnerMode;
 	agentStartedAtMs: number | null;
@@ -61,6 +64,7 @@ export interface SpinnerStateOptions {
 
 export function createSpinnerRuntimeState(): SpinnerRuntimeState {
 	return {
+		phase: "hidden",
 		active: false,
 		mode: "requesting",
 		agentStartedAtMs: null,
@@ -89,7 +93,8 @@ export function shouldShowSpinnerMetrics(
 	nowMs: number,
 	verbose: boolean,
 ): boolean {
-	return state.agentStartedAtMs !== null
+	return state.active
+		&& state.agentStartedAtMs !== null
 		&& (verbose || nowMs - state.agentStartedAtMs > 30_000);
 }
 
@@ -114,6 +119,7 @@ export class SpinnerStateMachine {
 		const now = this.options.clock.now();
 		this.runtimeState = {
 			...createSpinnerRuntimeState(),
+			phase: "running",
 			active: true,
 			agentStartedAtMs: now,
 			lastResponseAtMs: now,
@@ -123,10 +129,27 @@ export class SpinnerStateMachine {
 	}
 
 	agentEnd(): void {
+		if (this.runtimeState.phase !== "running") return;
+		if (this.hasCurrentTokenUsage()) this.finalizeCurrentTokenUsage();
+		this.runtimeState.phase = "idle";
+		this.runtimeState.active = false;
+		this.runtimeState.turnStartedAtMs = null;
+		this.runtimeState.lastResponseAtMs = null;
+		this.runtimeState.activeToolIds.clear();
+		this.runtimeState.thinkingStartedAtMs = null;
+		this.runtimeState.thinkingEndedAtMs = null;
+		this.runtimeState.thinkingActualDurationMs = null;
+		this.runtimeState.thinkingPhase = "none";
+		this.runtimeState.thinkingPhaseUntilMs = null;
+		this.runtimeState.stalledIntensity = 0;
+	}
+
+	hide(): void {
 		this.runtimeState = createSpinnerRuntimeState();
 	}
 
 	turnStart(): void {
+		if (this.runtimeState.phase !== "running") return;
 		const now = this.options.clock.now();
 		if (this.hasCurrentTokenUsage()) this.finalizeCurrentTokenUsage();
 		this.runtimeState.mode = "requesting";
@@ -139,6 +162,7 @@ export class SpinnerStateMachine {
 	}
 
 	messageUpdate(event: SpinnerMessageEvent, usage?: SpinnerTokenUsage): void {
+		if (this.runtimeState.phase !== "running") return;
 		this.updateCurrentTokenUsage(usage);
 		switch (event.type) {
 			case "thinking_start":
@@ -172,17 +196,20 @@ export class SpinnerStateMachine {
 	}
 
 	messageEnd(usage?: SpinnerTokenUsage): void {
+		if (this.runtimeState.phase !== "running") return;
 		if (this.runtimeState.thinkingPhase === "thinking") this.endThinking();
 		this.finalizeCurrentTokenUsage(usage);
 	}
 
 	toolExecutionStart(toolCallId: string): void {
+		if (this.runtimeState.phase !== "running") return;
 		this.runtimeState.activeToolIds.add(toolCallId);
 		this.runtimeState.mode = "tool-use";
 		this.runtimeState.stalledIntensity = 0;
 	}
 
 	toolExecutionEnd(toolCallId: string): void {
+		if (this.runtimeState.phase !== "running") return;
 		const removed = this.runtimeState.activeToolIds.delete(toolCallId);
 		if (removed && this.runtimeState.activeToolIds.size === 0) {
 			this.runtimeState.lastResponseAtMs = this.options.clock.now();
@@ -191,10 +218,12 @@ export class SpinnerStateMachine {
 	}
 
 	setEffectiveEffort(level: string | null, reasoning: boolean): void {
+		if (this.runtimeState.phase !== "running") return;
 		this.runtimeState.effectiveEffort = reasoning && level && level !== "off" ? level : null;
 	}
 
 	tick(): void {
+		if (this.runtimeState.phase !== "running") return;
 		const now = this.options.clock.now();
 		this.advanceThinking(now);
 		this.runtimeState.stalledIntensity = this.calculateStallIntensity(now);
@@ -286,7 +315,7 @@ export class SpinnerStateMachine {
 
 	private calculateStallIntensity(now: number): number {
 		const state = this.runtimeState;
-		if (!state.active || state.activeToolIds.size > 0 || state.lastResponseAtMs === null) return 0;
+		if (state.phase !== "running" || state.activeToolIds.size > 0 || state.lastResponseAtMs === null) return 0;
 		return Math.min(1, Math.max(0, (now - state.lastResponseAtMs - STALL_DELAY_MS) / STALL_RAMP_MS));
 	}
 }
