@@ -70,7 +70,7 @@ export function createSpinnerWidget(
 				: frames[frameIndex] ?? frames[0] ?? "·";
 			const color = spinnerColor(snapshot.stalledIntensity);
 			const line = `${theme.fg(color, glyph)} ${theme.fg("muted", snapshot.message)}`;
-			return [truncateToWidth(line, width, theme.fg("dim", "..."))];
+			return [truncateToWidth(line, width, theme.fg("dim", "...")), ""];
 		},
 	};
 }
