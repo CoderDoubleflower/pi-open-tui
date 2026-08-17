@@ -6,11 +6,13 @@ import {
 	SPINNER_GLYPHS,
 	type SpinnerPlatform,
 } from "./spinner-render.ts";
+import type { SpinnerPhase } from "./spinner-state.ts";
 
 export const SPINNER_WIDGET_KEY = "open-tui-spinner";
 export const SPINNER_WIDGET_INTERVAL_MS = 120;
 
 export interface SpinnerWidgetSnapshot {
+	phase: SpinnerPhase;
 	active: boolean;
 	message?: string;
 	reducedMotion: boolean;
@@ -46,7 +48,7 @@ export function createSpinnerWidget(
 	const animationTimer = setInterval(() => {
 		if (disposed) return;
 		const snapshot = source.getWidgetSnapshot();
-		if (!snapshot.active || snapshot.reducedMotion) return;
+		if (snapshot.phase !== "running" || snapshot.reducedMotion) return;
 		frameIndex = (frameIndex + 1) % frames.length;
 		tui.requestRender();
 	}, SPINNER_WIDGET_INTERVAL_MS);
@@ -63,7 +65,8 @@ export function createSpinnerWidget(
 		render(width: number): string[] {
 			if (disposed || width <= 0) return [];
 			const snapshot = source.getWidgetSnapshot();
-			if (!snapshot.active || !snapshot.message) return [];
+			if (snapshot.phase === "hidden") return [];
+			if (snapshot.phase === "idle" || !snapshot.message) return ["", ""];
 
 			const glyph = snapshot.reducedMotion
 				? "●"

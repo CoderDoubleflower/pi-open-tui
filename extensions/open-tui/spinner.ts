@@ -53,6 +53,7 @@ function effortValue(level: string | null, reasoning: boolean): string | null {
 function renderSignature(snapshot: SpinnerWidgetSnapshot): string {
 	const stallBucket = snapshot.stalledIntensity >= 1 ? 2 : snapshot.stalledIntensity > 0 ? 1 : 0;
 	return JSON.stringify([
+		snapshot.phase,
 		snapshot.active,
 		snapshot.message,
 		snapshot.reducedMotion,
@@ -118,6 +119,7 @@ export class SpinnerController implements SpinnerWidgetSource {
 			randomVerb: this.state.randomVerb,
 		});
 		return {
+			phase: this.state.phase,
 			active: this.state.active,
 			message: renderNativeSpinnerMessage({
 				state: this.state,
@@ -179,13 +181,17 @@ export class SpinnerController implements SpinnerWidgetSource {
 	}
 
 	beforeCompact(): void {
-		this.agentEnd();
+		if (this.disposed) return;
+		this.stateMachine.hide();
+		this.eventStore.agentEnd();
+		this.suffixStore.agentEnd();
+		this.publish();
 	}
 
 	dispose(): void {
 		if (this.disposed) return;
 		this.disposed = true;
-		this.stateMachine.agentEnd();
+		this.stateMachine.hide();
 		this.eventStore.dispose();
 		this.suffixStore.dispose();
 		this.requestRender?.();
