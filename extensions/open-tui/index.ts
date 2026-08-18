@@ -5,6 +5,7 @@ import { installEditor } from "./editor.ts";
 import { installFooter } from "./footer.ts";
 import { installHeader } from "./header.ts";
 import { emptyGitStatus, readGitStatus } from "./git.ts";
+import { installClaudeStyleMarkdown } from "./markdown.ts";
 import { installOutputPrefixes } from "./output-prefix.ts";
 import { readRuntimeInfo } from "./runtime.ts";
 import { SessionLifecycle } from "./session-lifecycle.ts";
@@ -65,6 +66,7 @@ export function registerOpenTui(pi: ExtensionAPI, spinnerDependencies?: SpinnerD
 	let cleanupFooter: (() => void) | undefined;
 	let cleanupEditor: (() => void) | undefined;
 	let cleanupUserMessages: (() => void) | undefined;
+	let cleanupMarkdown: (() => void) | undefined;
 	let cleanupOutputPrefixes: (() => void) | undefined;
 	let spinnerInstallation: SpinnerInstallation | undefined;
 	let pendingUiChange: "install" | "uninstall" | undefined;
@@ -101,6 +103,7 @@ export function registerOpenTui(pi: ExtensionAPI, spinnerDependencies?: SpinnerD
 				() => config.editor.autocompleteDirection,
 			);
 			cleanupUserMessages = installCompactUserMessages();
+			cleanupMarkdown = installClaudeStyleMarkdown();
 			cleanupOutputPrefixes = installOutputPrefixes(() => ctx.ui.theme);
 			spinnerInstallation = installSpinner(pi.events, ctx, () => config.spinner, spinnerDependencies);
 			active = true;
@@ -126,11 +129,13 @@ export function registerOpenTui(pi: ExtensionAPI, spinnerDependencies?: SpinnerD
 			cleanupEditor?.();
 			cleanupUserMessages?.();
 			cleanupOutputPrefixes?.();
+			cleanupMarkdown?.();
 			cleanupHeader = undefined;
 			cleanupFooter = undefined;
 			cleanupEditor = undefined;
 			cleanupUserMessages = undefined;
 			cleanupOutputPrefixes = undefined;
+			cleanupMarkdown = undefined;
 			spinnerInstallation = undefined;
 			requestFooterRender = undefined;
 			active = false;
