@@ -79,7 +79,7 @@ export function registerOpenTui(pi: ExtensionAPI, spinnerDependencies?: SpinnerD
 			return;
 		}
 		if (!active) {
-			cleanupHeader = installHeader(pi, ctx);
+			cleanupHeader = installHeader(pi, ctx, config.fullscreen.wheelScrollLines);
 			cleanupFooter = installFooter(
 				ctx,
 				() => state,

@@ -17,6 +17,11 @@ import type {
 	SpinnerTaskIntegration,
 	SpinnerVerbMode,
 } from "./config.ts";
+import {
+	applyFullscreenWheelScrollLines,
+	MAX_FULLSCREEN_WHEEL_SCROLL_LINES,
+	MIN_FULLSCREEN_WHEEL_SCROLL_LINES,
+} from "./fullscreen-scroll.ts";
 
 interface SettingItem {
 	id: string;
@@ -37,6 +42,7 @@ const COPY = {
 			enabled: "Enabled",
 			language: "Language",
 			autocompleteDirection: "Autocomplete menu",
+			wheelScrollLines: "Mouse wheel speed",
 			iconMode: "Icon mode",
 			spinnerVerbose: "Verbose metadata",
 			reducedMotion: "Reduced motion",
@@ -71,6 +77,7 @@ const COPY = {
 			off: "Off",
 			languages: { en: "English", zh: "简体中文" },
 			autocompleteDirections: { up: "Open upward", down: "Open downward" },
+			wheelLines: (count: number) => `${count} ${count === 1 ? "line" : "lines"} / notch`,
 			icons: { auto: "Auto", nerd: "Nerd", ascii: "ASCII" },
 			effortDisplays: { effective: "Effective", off: "Hidden" },
 			taskIntegrations: { events: "Events", off: "Off" },
@@ -86,6 +93,7 @@ const COPY = {
 			enabled: "启用",
 			language: "语言",
 			autocompleteDirection: "补全菜单",
+			wheelScrollLines: "鼠标滚轮速度",
 			iconMode: "图标模式",
 			spinnerVerbose: "详细元数据",
 			reducedMotion: "减少动态效果",
@@ -120,6 +128,7 @@ const COPY = {
 			off: "关闭",
 			languages: { en: "English", zh: "简体中文" },
 			autocompleteDirections: { up: "向上弹出", down: "向下弹出" },
+			wheelLines: (count: number) => `每格 ${count} 行`,
 			icons: { auto: "自动", nerd: "Nerd", ascii: "ASCII" },
 			effortDisplays: { effective: "显示当前强度", off: "隐藏" },
 			taskIntegrations: { events: "事件", off: "关闭" },
@@ -159,6 +168,14 @@ function toggleLanguage(config: OpenTuiConfig): OpenTuiConfig {
 function toggleAutocompleteDirection(config: OpenTuiConfig): OpenTuiConfig {
 	const direction: AutocompleteDirection = config.editor.autocompleteDirection === "down" ? "up" : "down";
 	return { ...config, editor: { ...config.editor, autocompleteDirection: direction } };
+}
+
+function cycleWheelScrollLines(config: OpenTuiConfig): OpenTuiConfig {
+	const current = config.fullscreen.wheelScrollLines;
+	const wheelScrollLines = current >= MAX_FULLSCREEN_WHEEL_SCROLL_LINES
+		? MIN_FULLSCREEN_WHEEL_SCROLL_LINES
+		: current + 1;
+	return { ...config, fullscreen: { ...config.fullscreen, wheelScrollLines } };
 }
 
 function toggleTelemetry(config: OpenTuiConfig, key: keyof OpenTuiConfig["telemetry"]): OpenTuiConfig {
@@ -202,6 +219,11 @@ function buildFeaturesItems(config: OpenTuiConfig, copy: SettingsCopy): SettingI
 			id: "autocompleteDirection",
 			label: copy.labels.autocompleteDirection,
 			currentValue: copy.values.autocompleteDirections[config.editor.autocompleteDirection],
+		},
+		{
+			id: "wheelScrollLines",
+			label: copy.labels.wheelScrollLines,
+			currentValue: copy.values.wheelLines(config.fullscreen.wheelScrollLines),
 		},
 	];
 }
@@ -302,6 +324,7 @@ function handleSettingChange(
 		if (itemId === "enabled") return toggleEnabled(config);
 		if (itemId === "settingsLanguage") return toggleLanguage(config);
 		if (itemId === "autocompleteDirection") return toggleAutocompleteDirection(config);
+		if (itemId === "wheelScrollLines") return cycleWheelScrollLines(config);
 	}
 	if (tab === "icons" && itemId === "mode") return cycleIconMode(config);
 	if (tab === "spinner") {
@@ -477,7 +500,10 @@ export function registerSettingsCommand(
 			const ui = new SettingsUi(
 				theme,
 				hooks.getConfig(),
-				(config) => hooks.onConfigChanged(config),
+				(config) => {
+					hooks.onConfigChanged(config);
+					applyFullscreenWheelScrollLines(tui, config.fullscreen.wheelScrollLines);
+				},
 				() => done(undefined),
 			);
 			return {

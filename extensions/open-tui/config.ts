@@ -1,6 +1,10 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import {
+	DEFAULT_FULLSCREEN_WHEEL_SCROLL_LINES,
+	normalizeFullscreenWheelScrollLines,
+} from "./fullscreen-scroll.ts";
 import type { IconMode } from "./icons.ts";
 import { normalizeCustomSpinnerVerbs } from "./spinner-verbs.ts";
 
@@ -33,6 +37,10 @@ export interface TelemetryConfig {
 	cost: boolean;
 }
 
+export interface FullscreenConfig {
+	wheelScrollLines: number;
+}
+
 export type SpinnerVerbMode = "append" | "replace";
 export type SpinnerEffortDisplay = "effective" | "off";
 export type SpinnerTaskIntegration = "events" | "off";
@@ -59,6 +67,7 @@ export interface OpenTuiConfig {
 	enabled: boolean;
 	settingsLanguage: SettingsLanguage;
 	footerScript: string | null;
+	fullscreen: FullscreenConfig;
 	editor: {
 		dynamicBorderColor: boolean;
 		autocompleteDirection: AutocompleteDirection;
@@ -75,6 +84,9 @@ export const DEFAULT_CONFIG: OpenTuiConfig = {
 	enabled: true,
 	settingsLanguage: "en",
 	footerScript: null,
+	fullscreen: {
+		wheelScrollLines: DEFAULT_FULLSCREEN_WHEEL_SCROLL_LINES,
+	},
 	editor: {
 		dynamicBorderColor: false,
 		autocompleteDirection: "up",
@@ -178,6 +190,10 @@ export function loadConfig(notify?: (msg: string, level: "warning" | "info") => 
 		if (config.footerScript !== null && typeof config.footerScript !== "string") {
 			config.footerScript = DEFAULT_CONFIG.footerScript;
 		}
+		config.fullscreen.wheelScrollLines = normalizeFullscreenWheelScrollLines(
+			config.fullscreen.wheelScrollLines,
+			DEFAULT_CONFIG.fullscreen.wheelScrollLines,
+		);
 		if (typeof config.editor.dynamicBorderColor !== "boolean") {
 			config.editor.dynamicBorderColor = DEFAULT_CONFIG.editor.dynamicBorderColor;
 		}
