@@ -36,7 +36,33 @@ test("defines every required pi theme color", () => {
 	for (const color of requiredColors) {
 		assert.ok(Object.hasOwn(theme.colors, color), `missing theme color: ${color}`);
 	}
-	assert.equal(theme.vars.accent, "#d78787");
+});
+
+test("matches Claude Code dark palette source values", () => {
+	assert.equal(theme.vars.claude, "#d77757");
+	assert.equal(theme.vars.claudeShimmer, "#eb9f7f");
+	assert.equal(theme.vars.permission, "#b1b9f9");
+	assert.equal(theme.vars.promptBorder, "#888888");
+	assert.equal(theme.vars.text, "#ffffff");
+	assert.equal(theme.vars.inactive, "#999999");
+	assert.equal(theme.vars.subtle, "#505050");
+	assert.equal(theme.vars.userMessageBg, "#373737");
+	assert.equal(theme.vars.success, "#4eba65");
+	assert.equal(theme.vars.error, "#ff6b80");
+	assert.equal(theme.vars.warning, "#ffc107");
+	assert.equal(theme.colors.bashMode, "bashBorder");
+});
+
+test("uses Claude Code Monokai Extended syntax colors", () => {
+	assert.equal(theme.colors.syntaxComment, "#75715e");
+	assert.equal(theme.colors.syntaxKeyword, "#f92672");
+	assert.equal(theme.colors.syntaxFunction, "#a6e22e");
+	assert.equal(theme.colors.syntaxVariable, "#ffffff");
+	assert.equal(theme.colors.syntaxString, "#e6db74");
+	assert.equal(theme.colors.syntaxNumber, "#be84ff");
+	assert.equal(theme.colors.syntaxType, "#a6e22e");
+	assert.equal(theme.colors.syntaxOperator, "#f92672");
+	assert.equal(theme.colors.syntaxPunctuation, "#f8f8f2");
 });
 
 test("inherits tool and custom message backgrounds from the terminal", () => {

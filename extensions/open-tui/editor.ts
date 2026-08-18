@@ -9,10 +9,11 @@ import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { AutocompleteDirection } from "./config.ts";
 import { findBottomBorderIndex, isEditorBorderLine, stripAnsi } from "./utils.ts";
 
-const BORDER_RGB = "\x1b[38;2;103;103;103m";
-const PROMPT_RGB = "\x1b[38;2;181;181;181m";
-const AUTOCOMPLETE_SELECTED_RGB = "\x1b[38;2;175;215;255m";
-const AUTOCOMPLETE_UNSELECTED_RGB = "\x1b[38;2;122;122;122m";
+// Claude Code Dark Theme: promptBorder, default text, suggestion.
+const BORDER_RGB = "\x1b[38;2;136;136;136m";
+const PROMPT_RGB = "\x1b[38;2;255;255;255m";
+const AUTOCOMPLETE_SELECTED_RGB = "\x1b[38;2;177;185;249m";
+const DIM = "\x1b[2m";
 const RESET = "\x1b[0m";
 const PROMPT_WIDTH = 2;
 
@@ -29,9 +30,7 @@ function isAutocompleteMetaLine(content: string): boolean {
 export function paintAutocompleteLine(line: string, showSlashPrefix = false): string {
 	const plain = stripAnsi(line);
 	const selected = plain.startsWith("→ ");
-	const color = selected
-		? AUTOCOMPLETE_SELECTED_RGB
-		: AUTOCOMPLETE_UNSELECTED_RGB;
+	const color = selected ? AUTOCOMPLETE_SELECTED_RGB : DIM;
 	const content = plain.slice(2);
 	let renderedContent = `  ${content}`;
 	if (showSlashPrefix && !isAutocompleteMetaLine(content)) {

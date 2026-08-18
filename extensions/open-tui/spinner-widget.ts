@@ -161,7 +161,8 @@ export function createSpinnerWidget(
 			} else {
 				const normalGlyph = snapshot.reducedMotion ? "●" : glyph;
 				const color = spinnerColor(snapshot.stalledIntensity);
-				line = `${theme.fg(color, normalGlyph)} ${theme.fg("muted", snapshot.message)}`;
+				// Claude Code renders the normal spinner glyph and active verb with the same Claude/stall color.
+				line = `${theme.fg(color, normalGlyph)} ${theme.fg(color, snapshot.message)}`;
 			}
 
 			const lines: string[] = [];

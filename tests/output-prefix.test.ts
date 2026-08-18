@@ -21,8 +21,8 @@ import {
 import { stripAnsi } from "../extensions/open-tui/utils.ts";
 
 const WHITE_DOT = "\x1b[38;2;255;255;255m●\x1b[39m";
-const PREPARING_DOT = "\x1b[38;2;153;153;153m●\x1b[39m";
-const RUNNING_DOT = "\x1b[38;2;215;119;87m●\x1b[39m";
+const PREPARING_DOT = "\x1b[2m●\x1b[22m";
+const RUNNING_DOT = "\x1b[2m●\x1b[22m";
 const SUCCESS_DOT = "\x1b[38;2;78;186;101m●\x1b[39m";
 const FAILURE_DOT = "\x1b[38;2;255;107;128m●\x1b[39m";
 
