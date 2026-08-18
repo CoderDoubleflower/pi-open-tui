@@ -1,5 +1,9 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { SpinnerConfig } from "./config.ts";
+import {
+	formatClaudeRetryStatus,
+	type NativeStatusPresentation,
+} from "./native-status-bridge.ts";
 import { TURN_COMPLETION_VERBS } from "./spinner-completion-verbs.ts";
 import { resolveSpinnerMessage } from "./spinner-content.ts";
 import {
@@ -19,6 +23,7 @@ import {
 	type SpinnerClock,
 	type SpinnerMessageEvent,
 	type SpinnerRandom,
+	type SpinnerRuntimeState,
 	type SpinnerTokenUsage,
 } from "./spinner-state.ts";
 import { SpinnerSuffixStore } from "./spinner-suffix.ts";
@@ -62,12 +67,26 @@ function renderSignature(snapshot: SpinnerWidgetSnapshot): string {
 		snapshot.phase,
 		snapshot.active,
 		snapshot.message,
+		snapshot.visualMode,
+		snapshot.retryMessage,
 		snapshot.completionVerb,
 		snapshot.completedDurationMs,
 		snapshot.hasAttachedTodos,
 		snapshot.reducedMotion,
 		stallBucket,
 	]);
+}
+
+interface NativeStatusState {
+	token: object;
+	presentation: NativeStatusPresentation;
+}
+
+interface RetryContinuationState {
+	agentStartedAtMs: number | null;
+	randomVerb: string;
+	inputTokens: number;
+	outputTokens: number;
 }
 
 export class SpinnerController implements SpinnerWidgetSource {
@@ -80,6 +99,8 @@ export class SpinnerController implements SpinnerWidgetSource {
 	private requestRender: (() => void) | undefined;
 	private lastRenderSignature = "";
 	private completionVerb = "Worked";
+	private nativeStatus: NativeStatusState | undefined;
+	private retryContinuation: RetryContinuationState | undefined;
 	private disposed = false;
 
 	constructor(
@@ -123,32 +144,112 @@ export class SpinnerController implements SpinnerWidgetSource {
 	getWidgetSnapshot(): SpinnerWidgetSnapshot {
 		const config = this.getConfig();
 		const content = this.eventStore.content;
+		const hasAttachedTodos = this.eventStore.hasTasks(TODO_SPINNER_SOURCE);
+		const presentation = this.nativeStatus?.presentation;
+
+		if (presentation?.style === "system-requesting") {
+			return {
+				phase: "running",
+				active: true,
+				message: presentation.message,
+				visualMode: "system-requesting",
+				completionVerb: this.completionVerb,
+				completedDurationMs: null,
+				hasAttachedTodos,
+				reducedMotion: config.reducedMotion,
+				stalledIntensity: 0,
+			};
+		}
+
+		const forceRunning = presentation?.style === "retry" || this.retryContinuation !== undefined;
+		const runtimeState: SpinnerRuntimeState = forceRunning && this.state.phase !== "running"
+			? {
+				...this.state,
+				phase: "running",
+				active: true,
+				mode: "requesting",
+				agentCompletedDurationMs: null,
+				lastResponseAtMs: this.dependencies.clock.now(),
+				stalledIntensity: 0,
+			}
+			: this.state;
+
 		const baseMessage = resolveSpinnerMessage({
 			overrideMessage: content.overrideMessage,
 			currentTask: config.taskIntegration === "events" ? content.currentTask : null,
-			randomVerb: this.state.randomVerb,
+			randomVerb: runtimeState.randomVerb,
 		});
+		const retryMessage = presentation?.style === "retry"
+			&& presentation.retry
+			&& presentation.retry.attempt >= 4
+			? formatClaudeRetryStatus(presentation.retry)
+			: undefined;
 		return {
-			phase: this.state.phase,
-			active: this.state.active,
+			phase: runtimeState.phase,
+			active: runtimeState.active,
 			message: renderNativeSpinnerMessage({
-				state: this.state,
+				state: runtimeState,
 				config,
 				nowMs: this.dependencies.clock.now(),
 				baseMessage,
 				suffix: config.showSuffix ? this.suffixStore.suffix : null,
 			}),
+			visualMode: "default",
+			retryMessage,
 			completionVerb: this.completionVerb,
-			completedDurationMs: this.state.agentCompletedDurationMs,
-			hasAttachedTodos: this.eventStore.hasTasks(TODO_SPINNER_SOURCE),
+			completedDurationMs: runtimeState.agentCompletedDurationMs,
+			hasAttachedTodos,
 			reducedMotion: config.reducedMotion,
-			stalledIntensity: config.showStall ? this.state.stalledIntensity : 0,
+			stalledIntensity: config.showStall ? runtimeState.stalledIntensity : 0,
 		};
+	}
+
+	nativeStatusStart(token: object, presentation: NativeStatusPresentation): void {
+		if (this.disposed || presentation.style === "working") return;
+		if (presentation.style === "system-requesting") {
+			this.retryContinuation = undefined;
+			this.stateMachine.hide();
+		} else {
+			this.captureRetryContinuation();
+		}
+		this.nativeStatus = { token, presentation };
+		this.publish();
+	}
+
+	nativeStatusUpdate(token: object, presentation: NativeStatusPresentation): void {
+		if (this.disposed || this.nativeStatus?.token !== token) return;
+		this.nativeStatus.presentation = presentation;
+		this.publish();
+	}
+
+	nativeStatusEnd(token: object): void {
+		if (this.disposed || this.nativeStatus?.token !== token) return;
+		const wasRetry = this.nativeStatus.presentation.style === "retry";
+		this.nativeStatus = undefined;
+		this.publish();
+
+		if (wasRetry && this.retryContinuation) {
+			const continuation = this.retryContinuation;
+			queueMicrotask(() => {
+				if (
+					this.disposed
+					|| this.retryContinuation !== continuation
+					|| this.nativeStatus !== undefined
+					|| this.state.phase === "running"
+				) return;
+				this.retryContinuation = undefined;
+				this.publish();
+			});
+		}
 	}
 
 	agentStart(level: string | null, reasoning: boolean): void {
 		if (this.disposed) return;
+		const continuation = this.retryContinuation;
+		this.nativeStatus = undefined;
+		this.retryContinuation = undefined;
 		this.stateMachine.agentStart(effortValue(level, reasoning));
+		if (continuation) this.restoreRetryContinuation(continuation);
 		this.publish();
 	}
 
@@ -199,6 +300,7 @@ export class SpinnerController implements SpinnerWidgetSource {
 
 	beforeCompact(): void {
 		if (this.disposed) return;
+		this.retryContinuation = undefined;
 		this.stateMachine.hide();
 		this.eventStore.agentEnd();
 		this.suffixStore.agentEnd();
@@ -208,12 +310,35 @@ export class SpinnerController implements SpinnerWidgetSource {
 	dispose(): void {
 		if (this.disposed) return;
 		this.disposed = true;
+		this.nativeStatus = undefined;
+		this.retryContinuation = undefined;
 		this.stateMachine.hide();
 		this.eventStore.dispose();
 		this.suffixStore.dispose();
 		this.requestRender?.();
 		this.requestRender = undefined;
 		this.lastRenderSignature = "";
+	}
+
+	private captureRetryContinuation(): void {
+		if (this.retryContinuation) return;
+		this.retryContinuation = {
+			agentStartedAtMs: this.state.agentStartedAtMs,
+			randomVerb: this.state.randomVerb,
+			inputTokens: this.state.inputTokens,
+			outputTokens: this.state.outputTokens,
+		};
+	}
+
+	private restoreRetryContinuation(continuation: RetryContinuationState): void {
+		if (continuation.agentStartedAtMs !== null) this.state.agentStartedAtMs = continuation.agentStartedAtMs;
+		if (continuation.randomVerb) this.state.randomVerb = continuation.randomVerb;
+		this.state.completedInputTokens = continuation.inputTokens;
+		this.state.completedOutputTokens = continuation.outputTokens;
+		this.state.currentInputTokens = 0;
+		this.state.currentOutputTokens = 0;
+		this.state.inputTokens = continuation.inputTokens;
+		this.state.outputTokens = continuation.outputTokens;
 	}
 
 	private update(change: () => void): void {
