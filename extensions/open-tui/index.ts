@@ -15,6 +15,7 @@ import {
 	type SpinnerDependencies,
 	type SpinnerInstallation,
 } from "./spinner.ts";
+import { TOKEN_COUNTER_FRAME_MS } from "./spinner-state.ts";
 import { formatTurnTelemetry, TurnTelemetryTracker } from "./telemetry.ts";
 import { installCompactUserMessages } from "./user-message.ts";
 import {
@@ -23,6 +24,9 @@ import {
 	invalidateUsageCache,
 	type FooterState,
 } from "./state.ts";
+
+export const SPINNER_CONTROLLER_TICK_INTERVAL_MS = TOKEN_COUNTER_FRAME_MS;
+export const WORKING_FOOTER_TICK_INTERVAL_MS = 250;
 
 function isInteractiveLaunch(): boolean {
 	if (!process.stdout.isTTY) return false;
@@ -61,7 +65,8 @@ export function registerOpenTui(pi: ExtensionAPI, spinnerDependencies?: SpinnerD
 	let active = false;
 	let lastCtx: ExtensionContext | undefined;
 	let requestFooterRender: (() => void) | undefined;
-	let workingTimer: ReturnType<typeof setInterval> | undefined;
+	let spinnerTickTimer: ReturnType<typeof setInterval> | undefined;
+	let workingFooterTimer: ReturnType<typeof setInterval> | undefined;
 	let cleanupHeader: (() => void) | undefined;
 	let cleanupFooter: (() => void) | undefined;
 	let cleanupEditor: (() => void) | undefined;
@@ -184,20 +189,30 @@ export function registerOpenTui(pi: ExtensionAPI, spinnerDependencies?: SpinnerD
 
 	const startWorkingTimer = () => {
 		stopWorkingTimer();
-		const tick = () => {
+		const tickSpinner = () => {
 			if (!sessionLifecycle.isCurrent() || !active) return;
 			spinnerInstallation?.controller.tick();
+		};
+		const renderFooter = () => {
+			if (!sessionLifecycle.isCurrent() || !active) return;
 			requestFooterRender?.();
 		};
-		tick();
-		workingTimer = setInterval(tick, 250);
-		workingTimer.unref?.();
+		tickSpinner();
+		renderFooter();
+		spinnerTickTimer = setInterval(tickSpinner, SPINNER_CONTROLLER_TICK_INTERVAL_MS);
+		workingFooterTimer = setInterval(renderFooter, WORKING_FOOTER_TICK_INTERVAL_MS);
+		spinnerTickTimer.unref?.();
+		workingFooterTimer.unref?.();
 	};
 
 	const stopWorkingTimer = () => {
-		if (workingTimer) {
-			clearInterval(workingTimer);
-			workingTimer = undefined;
+		if (spinnerTickTimer) {
+			clearInterval(spinnerTickTimer);
+			spinnerTickTimer = undefined;
+		}
+		if (workingFooterTimer) {
+			clearInterval(workingFooterTimer);
+			workingFooterTimer = undefined;
 		}
 	};
 

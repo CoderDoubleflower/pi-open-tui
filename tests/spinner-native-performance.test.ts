@@ -9,10 +9,18 @@ import type {
 import type { Component, TUI } from "@earendil-works/pi-tui";
 import { DEFAULT_CONFIG } from "../extensions/open-tui/config.ts";
 import {
+	SPINNER_CONTROLLER_TICK_INTERVAL_MS,
+	WORKING_FOOTER_TICK_INTERVAL_MS,
+} from "../extensions/open-tui/index.ts";
+import {
 	installSpinner,
 	type SpinnerDependencies,
 } from "../extensions/open-tui/spinner.ts";
-import type { SpinnerClock, SpinnerRandom } from "../extensions/open-tui/spinner-state.ts";
+import {
+	TOKEN_COUNTER_FRAME_MS,
+	type SpinnerClock,
+	type SpinnerRandom,
+} from "../extensions/open-tui/spinner-state.ts";
 import { SPINNER_SUFFIX_EVENT } from "../extensions/open-tui/spinner-suffix.ts";
 import { SPINNER_WIDGET_INTERVAL_MS } from "../extensions/open-tui/spinner-widget.ts";
 
@@ -105,6 +113,12 @@ test("custom widget keeps the original 120ms animation cadence", () => {
 	assert.equal(SPINNER_WIDGET_INTERVAL_MS, 120);
 });
 
+test("controller matches Claude's 50ms token clock without accelerating the footer", () => {
+	assert.equal(TOKEN_COUNTER_FRAME_MS, 50);
+	assert.equal(SPINNER_CONTROLLER_TICK_INTERVAL_MS, TOKEN_COUNTER_FRAME_MS);
+	assert.equal(WORKING_FOOTER_TICK_INTERVAL_MS, 250);
+});
+
 test("60 seconds of controller ticks are deduplicated to visible timer changes", () => {
 	const result = setup();
 	result.config.verbose = true;
@@ -160,7 +174,7 @@ test("streamed response length, not provider usage, drives the visible token cou
 	result.installation.dispose();
 });
 
-test("non-reduced token counter smoothly catches up instead of snapping", () => {
+test("non-reduced token counter advances on each Claude-style 50ms frame", () => {
 	const result = setup();
 	result.config.verbose = true;
 	result.config.showTimer = false;
@@ -170,10 +184,17 @@ test("non-reduced token counter smoothly catches up instead of snapping", () => 
 	controller.messageUpdate({ type: "text_delta", delta: "x".repeat(400) });
 	assert.doesNotMatch(result.renderWidget()[0] ?? "", /tokens/);
 
-	result.clock.value = 250;
-	controller.tick();
-	assert.match(result.renderWidget()[0] ?? "", /↓ 63 tokens/);
-	assert.doesNotMatch(result.renderWidget()[0] ?? "", /↓ 100 tokens/);
+	for (const [nowMs, tokens] of [
+		[50, 13],
+		[100, 25],
+		[150, 38],
+		[200, 50],
+		[250, 63],
+	] as const) {
+		result.clock.value = nowMs;
+		controller.tick();
+		assert.match(result.renderWidget()[0] ?? "", new RegExp(`↓ ${tokens} tokens`));
+	}
 
 	result.clock.value = 5_000;
 	controller.tick();
