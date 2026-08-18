@@ -42,12 +42,56 @@ function render(
 	}) ?? "";
 }
 
-test("renders separate input and output tokens independently of mode", () => {
+test("renders one Claude-style token counter with direction derived from mode", () => {
 	for (const mode of ["requesting", "thinking", "responding", "tool-input", "tool-use"] as SpinnerMode[]) {
-		const message = render(activeState({ mode, inputTokens: 4_800, outputTokens: 1_200 }));
+		const message = render(activeState({
+			mode,
+			inputTokens: 4_800,
+			outputTokens: 1_200,
+			responseLength: 4_800,
+			displayedResponseLength: 4_800,
+		}));
+		const arrow = mode === "requesting" ? "↑" : "↓";
 		assert.match(message, /^Working…/);
-		assert.match(message, /↑ 4\.8k tokens · ↓ 1\.2k tokens/);
+		assert.match(message, new RegExp(`${arrow} 1\\.2k tokens`));
+		assert.doesNotMatch(message, /4\.8k tokens/);
+		assert.equal((message.match(/tokens/g) ?? []).length, 1);
 	}
+});
+
+test("real provider usage is retained in state but not rendered as spinner token segments", () => {
+	const message = render(activeState({
+		mode: "responding",
+		inputTokens: 4_800,
+		outputTokens: 1_200,
+	}));
+	assert.equal(message, "Working… (31s)");
+});
+
+test("uses Claude-style compact token formatting", () => {
+	assert.equal(
+		render(activeState({
+			mode: "responding",
+			responseLength: 40_000,
+			displayedResponseLength: 40_000,
+		})),
+		"Working… (31s · ↓ 10.0k tokens)",
+	);
+});
+
+test("reduced motion snaps the visible token estimate to the streamed response length", () => {
+	const state = activeState({
+		mode: "responding",
+		responseLength: 400,
+		displayedResponseLength: 0,
+	});
+	const config = structuredClone(DEFAULT_CONFIG.spinner);
+	config.verbose = true;
+	config.reducedMotion = true;
+	assert.equal(
+		renderNativeSpinnerMessage({ state, config, nowMs: 1_000 }),
+		"Working… (1s · ↓ 100 tokens)",
+	);
 });
 
 test("preserves thinking, hold, effort, and completed thought wording", () => {
@@ -68,32 +112,41 @@ test("orders native message metadata as timer, tokens, thinking", () => {
 		mode: "responding",
 		inputTokens: 2_000,
 		outputTokens: 1_200,
+		responseLength: 4_800,
+		displayedResponseLength: 4_800,
 		thinkingPhase: "thinking",
 		effectiveEffort: "high",
 	}));
 	assert.equal(
 		message,
-		"Working… (31s · ↑ 2.0k tokens · ↓ 1.2k tokens · thinking with high effort)",
+		"Working… (31s · ↓ 1.2k tokens · thinking with high effort)",
 	);
 });
 
 test("uses the strict 30 second metadata gate", () => {
-	const state = activeState({ inputTokens: 100, outputTokens: 25 });
+	const state = activeState({
+		responseLength: 400,
+		displayedResponseLength: 400,
+	});
 	assert.equal(render(state, { nowMs: 29_999, verbose: false }), "Working…");
 	assert.equal(render(state, { nowMs: 30_000, verbose: false }), "Working…");
 	assert.equal(
 		render(state, { nowMs: 30_001, verbose: false }),
-		"Working… (30s · ↑ 100 tokens · ↓ 25 tokens)",
+		"Working… (30s · ↑ 100 tokens)",
 	);
 	assert.equal(
 		render(state, { nowMs: 65_000, verbose: false }),
-		"Working… (1m 5s · ↑ 100 tokens · ↓ 25 tokens)",
+		"Working… (1m 5s · ↑ 100 tokens)",
 	);
 });
 
 test("verbose native message exposes metrics immediately", () => {
 	assert.equal(
-		render(activeState({ mode: "responding", outputTokens: 100 }), { nowMs: 1_000 }),
+		render(activeState({
+			mode: "responding",
+			responseLength: 400,
+			displayedResponseLength: 400,
+		}), { nowMs: 1_000 }),
 		"Working… (1s · ↓ 100 tokens)",
 	);
 });
@@ -103,6 +156,8 @@ test("honors native message segment and effort display switches", () => {
 		mode: "responding",
 		inputTokens: 400,
 		outputTokens: 100,
+		responseLength: 400,
+		displayedResponseLength: 400,
 		thinkingPhase: "thinking",
 		effectiveEffort: "high",
 	});
@@ -131,6 +186,8 @@ test("orders suffix before timer, tokens, and thinking", () => {
 		mode: "responding",
 		inputTokens: 2_000,
 		outputTokens: 1_200,
+		responseLength: 4_800,
+		displayedResponseLength: 4_800,
 		thinkingPhase: "thinking",
 		effectiveEffort: "high",
 	});
@@ -141,7 +198,7 @@ test("orders suffix before timer, tokens, and thinking", () => {
 		config,
 		nowMs: 31_000,
 		suffix: "workspace",
-	}), "Working… (workspace · 31s · ↑ 2.0k tokens · ↓ 1.2k tokens · thinking with high effort)");
+	}), "Working… (workspace · 31s · ↓ 1.2k tokens · thinking with high effort)");
 });
 
 test("suffix visibility is independent from the main message", () => {

@@ -87,6 +87,8 @@ interface RetryContinuationState {
 	randomVerb: string;
 	inputTokens: number;
 	outputTokens: number;
+	responseLength: number;
+	displayedResponseLength: number;
 }
 
 export class SpinnerController implements SpinnerWidgetSource {
@@ -327,6 +329,8 @@ export class SpinnerController implements SpinnerWidgetSource {
 			randomVerb: this.state.randomVerb,
 			inputTokens: this.state.inputTokens,
 			outputTokens: this.state.outputTokens,
+			responseLength: this.state.responseLength,
+			displayedResponseLength: this.state.displayedResponseLength,
 		};
 	}
 
@@ -339,6 +343,9 @@ export class SpinnerController implements SpinnerWidgetSource {
 		this.state.currentOutputTokens = 0;
 		this.state.inputTokens = continuation.inputTokens;
 		this.state.outputTokens = continuation.outputTokens;
+		this.state.responseLength = continuation.responseLength;
+		this.state.displayedResponseLength = continuation.displayedResponseLength;
+		this.state.lastTokenAnimationAtMs = this.dependencies.clock.now();
 	}
 
 	private update(change: () => void): void {

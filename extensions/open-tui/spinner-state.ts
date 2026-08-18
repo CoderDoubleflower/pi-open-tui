@@ -2,6 +2,8 @@ export const MIN_THINKING_VISIBLE_MS = 2_000;
 export const THOUGHT_VISIBLE_MS = 2_000;
 export const STALL_DELAY_MS = 3_000;
 export const STALL_RAMP_MS = 2_000;
+export const TOKEN_COUNTER_FRAME_MS = 50;
+export const TOKEN_ESTIMATE_CHARS_PER_TOKEN = 4;
 
 export type SpinnerMode =
 	| "requesting"
@@ -31,12 +33,18 @@ export interface SpinnerRuntimeState {
 	agentCompletedDurationMs: number | null;
 	turnStartedAtMs: number | null;
 	randomVerb: string;
+	/** Real provider-reported usage retained for telemetry/accounting. */
 	inputTokens: number;
 	outputTokens: number;
 	completedInputTokens: number;
 	completedOutputTokens: number;
 	currentInputTokens: number;
 	currentOutputTokens: number;
+	/** Claude-style spinner counter source: streamed assistant response length. */
+	responseLength: number;
+	/** Smoothed response length used by the visible spinner token estimate. */
+	displayedResponseLength: number;
+	lastTokenAnimationAtMs: number | null;
 	lastResponseAtMs: number | null;
 	activeToolIds: Set<string>;
 	thinkingStartedAtMs: number | null;
@@ -79,6 +87,9 @@ export function createSpinnerRuntimeState(): SpinnerRuntimeState {
 		completedOutputTokens: 0,
 		currentInputTokens: 0,
 		currentOutputTokens: 0,
+		responseLength: 0,
+		displayedResponseLength: 0,
+		lastTokenAnimationAtMs: null,
 		lastResponseAtMs: null,
 		activeToolIds: new Set(),
 		thinkingStartedAtMs: null,
@@ -106,6 +117,16 @@ export function thoughtDurationSeconds(state: SpinnerRuntimeState): number | nul
 	return Math.max(1, Math.round(state.thinkingActualDurationMs / 1_000));
 }
 
+export function spinnerDisplayTokens(
+	state: SpinnerRuntimeState,
+	reducedMotion = false,
+): number {
+	const responseLength = reducedMotion
+		? state.responseLength
+		: state.displayedResponseLength;
+	return Math.round(responseLength / TOKEN_ESTIMATE_CHARS_PER_TOKEN);
+}
+
 export class SpinnerStateMachine {
 	private runtimeState = createSpinnerRuntimeState();
 	private readonly options: SpinnerStateOptions;
@@ -125,6 +146,7 @@ export class SpinnerStateMachine {
 			phase: "running",
 			active: true,
 			agentStartedAtMs: now,
+			lastTokenAnimationAtMs: now,
 			lastResponseAtMs: now,
 			randomVerb: this.options.random.pick(this.options.getVerbs()),
 			effectiveEffort,
@@ -141,6 +163,7 @@ export class SpinnerStateMachine {
 		this.runtimeState.phase = "idle";
 		this.runtimeState.active = false;
 		this.runtimeState.turnStartedAtMs = null;
+		this.runtimeState.lastTokenAnimationAtMs = null;
 		this.runtimeState.lastResponseAtMs = null;
 		this.runtimeState.activeToolIds.clear();
 		this.runtimeState.thinkingStartedAtMs = null;
@@ -233,6 +256,7 @@ export class SpinnerStateMachine {
 		if (this.runtimeState.phase !== "running") return;
 		const now = this.options.clock.now();
 		this.advanceThinking(now);
+		this.advanceTokenCounter(now);
 		this.runtimeState.stalledIntensity = this.calculateStallIntensity(now);
 	}
 
@@ -264,6 +288,7 @@ export class SpinnerStateMachine {
 
 	private recordDelta(delta: string): void {
 		if (delta.length === 0) return;
+		this.runtimeState.responseLength += delta.length;
 		this.runtimeState.lastResponseAtMs = this.options.clock.now();
 		this.runtimeState.stalledIntensity = 0;
 	}
@@ -284,6 +309,31 @@ export class SpinnerStateMachine {
 		) {
 			this.runtimeState.thinkingPhase = "none";
 			this.runtimeState.thinkingPhaseUntilMs = null;
+		}
+	}
+
+	private advanceTokenCounter(now: number): void {
+		const state = this.runtimeState;
+		const lastAnimationAt = state.lastTokenAnimationAtMs;
+		if (lastAnimationAt === null) {
+			state.lastTokenAnimationAtMs = now;
+			return;
+		}
+		const frameCount = Math.floor((now - lastAnimationAt) / TOKEN_COUNTER_FRAME_MS);
+		if (frameCount <= 0) return;
+		state.lastTokenAnimationAtMs = lastAnimationAt + frameCount * TOKEN_COUNTER_FRAME_MS;
+
+		for (let frame = 0; frame < frameCount && state.displayedResponseLength < state.responseLength; frame++) {
+			const gap = state.responseLength - state.displayedResponseLength;
+			const increment = gap < 70
+				? 3
+				: gap < 200
+					? Math.max(8, Math.ceil(gap * 0.15))
+					: 50;
+			state.displayedResponseLength = Math.min(
+				state.displayedResponseLength + increment,
+				state.responseLength,
+			);
 		}
 	}
 

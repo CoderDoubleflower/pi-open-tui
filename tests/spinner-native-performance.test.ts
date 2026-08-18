@@ -120,10 +120,11 @@ test("60 seconds of controller ticks are deduplicated to visible timer changes",
 	result.installation.dispose();
 });
 
-test("stream chunks without visible changes do not request extra renders", () => {
+test("stream chunks without visible segments do not request extra renders", () => {
 	const result = setup();
 	result.config.verbose = true;
 	result.config.showTimer = false;
+	result.config.showTokens = false;
 	const controller = result.installation.controller;
 	controller.agentStart(null, false);
 	controller.messageUpdate({ type: "text_start" });
@@ -136,7 +137,7 @@ test("stream chunks without visible changes do not request extra renders", () =>
 	result.installation.dispose();
 });
 
-test("provider usage publishes immediately while unchanged ticks stay deduplicated", () => {
+test("streamed response length, not provider usage, drives the visible token counter", () => {
 	const result = setup();
 	result.config.verbose = true;
 	result.config.showTimer = false;
@@ -148,10 +149,35 @@ test("provider usage publishes immediately while unchanged ticks stay deduplicat
 		{ input: 40, output: 100 },
 	);
 	assert.equal(result.renderRequests(), beforeUsage + 1);
-	assert.match(result.renderWidget()[0] ?? "", /↑ 40 tokens · ↓ 100 tokens/);
+	assert.match(result.renderWidget()[0] ?? "", /↓ 100 tokens/);
+	assert.doesNotMatch(result.renderWidget()[0] ?? "", /↑ 40 tokens/);
+
 	const settledRequests = result.renderRequests();
-	for (let tick = 1; tick <= 10; tick++) controller.tick();
+	controller.messageUpdate({ type: "done" }, { input: 4_000, output: 2_000 });
 	assert.equal(result.renderRequests(), settledRequests);
+	assert.equal(controller.state.inputTokens, 4_000);
+	assert.equal(controller.state.outputTokens, 2_000);
+	result.installation.dispose();
+});
+
+test("non-reduced token counter smoothly catches up instead of snapping", () => {
+	const result = setup();
+	result.config.verbose = true;
+	result.config.showTimer = false;
+	result.config.reducedMotion = false;
+	const controller = result.installation.controller;
+	controller.agentStart(null, false);
+	controller.messageUpdate({ type: "text_delta", delta: "x".repeat(400) });
+	assert.doesNotMatch(result.renderWidget()[0] ?? "", /tokens/);
+
+	result.clock.value = 250;
+	controller.tick();
+	assert.match(result.renderWidget()[0] ?? "", /↓ 63 tokens/);
+	assert.doesNotMatch(result.renderWidget()[0] ?? "", /↓ 100 tokens/);
+
+	result.clock.value = 5_000;
+	controller.tick();
+	assert.match(result.renderWidget()[0] ?? "", /↓ 100 tokens/);
 	result.installation.dispose();
 });
 

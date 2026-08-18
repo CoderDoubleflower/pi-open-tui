@@ -177,7 +177,7 @@ test("agent state renders through the custom widget", () => {
 	result.installation!.dispose();
 });
 
-test("provider usage and timer are read lazily by widget render", () => {
+test("streamed response length drives spinner tokens while provider usage stays accounted", () => {
 	const result = setup();
 	result.config.verbose = true;
 	const controller = result.installation!.controller;
@@ -185,13 +185,22 @@ test("provider usage and timer are read lazily by widget render", () => {
 	assert.match(result.renderWidget()[0] ?? "", /Working… \(0s\)/);
 
 	controller.messageUpdate(
-		{ type: "text_delta", delta: "x".repeat(100) },
+		{ type: "text_delta", delta: "x".repeat(400) },
 		{ input: 50, output: 25 },
 	);
-	assert.match(result.renderWidget()[0] ?? "", /↑ 50 tokens · ↓ 25 tokens/);
+	assert.equal(controller.state.inputTokens, 50);
+	assert.equal(controller.state.outputTokens, 25);
+	assert.equal(controller.state.responseLength, 400);
+	assert.doesNotMatch(result.renderWidget()[0] ?? "", /↑ 50 tokens/);
+
+	result.clock.value = 250;
+	controller.tick();
+	assert.match(result.renderWidget()[0] ?? "", /↓ 63 tokens/);
+
 	result.clock.value = 60_000;
 	controller.tick();
 	assert.match(result.renderWidget()[0] ?? "", /1m 0s/);
+	assert.match(result.renderWidget()[0] ?? "", /↓ 100 tokens/);
 	result.installation!.dispose();
 });
 
@@ -303,10 +312,11 @@ test("compaction hides the widget without remounting it", () => {
 test("widget truncates its row to the available width", () => {
 	const result = setup();
 	result.config.verbose = true;
+	result.config.reducedMotion = true;
 	const controller = result.installation!.controller;
 	controller.agentStart(null, false);
 	controller.messageUpdate(
-		{ type: "text_delta", delta: "x" },
+		{ type: "text_delta", delta: "x".repeat(123_456) },
 		{ input: 123_456, output: 78_900 },
 	);
 	const line = result.renderWidget(20)[0] ?? "";

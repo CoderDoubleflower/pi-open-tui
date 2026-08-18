@@ -8,10 +8,12 @@ import { sanitizeSpinnerMessage } from "./spinner-content.ts";
 import { sanitizeSpinnerSuffix } from "./spinner-suffix.ts";
 import {
 	shouldShowSpinnerMetrics,
+	spinnerDisplayTokens,
 	thoughtDurationSeconds,
+	type SpinnerMode,
 	type SpinnerRuntimeState,
 } from "./spinner-state.ts";
-import { fmtTokens, formatDuration } from "./utils.ts";
+import { formatDuration } from "./utils.ts";
 
 export type SpinnerPlatform = "macos" | "ghostty" | "other";
 
@@ -32,6 +34,21 @@ export interface NativeSpinnerMessageOptions {
 	nowMs: number;
 	baseMessage?: string;
 	suffix?: string | null;
+}
+
+const spinnerTokenFormatter = new Intl.NumberFormat("en-US", {
+	notation: "compact",
+	maximumFractionDigits: 1,
+	minimumFractionDigits: 1,
+});
+
+function formatSpinnerTokens(tokens: number): string {
+	if (tokens < 1_000) return tokens.toString();
+	return spinnerTokenFormatter.format(tokens).toLowerCase();
+}
+
+function spinnerTokenDirection(mode: SpinnerMode): "↑" | "↓" {
+	return mode === "requesting" ? "↑" : "↓";
 }
 
 export function detectSpinnerPlatform(input: SpinnerEnvironment): SpinnerPlatform {
@@ -95,8 +112,10 @@ export function renderNativeSpinnerMessage(options: NativeSpinnerMessageOptions)
 			metadata.push(formatDuration(Math.max(0, nowMs - state.agentStartedAtMs!)));
 		}
 		if (config.showTokens) {
-			if (state.inputTokens > 0) metadata.push(`↑ ${fmtTokens(state.inputTokens)} tokens`);
-			if (state.outputTokens > 0) metadata.push(`↓ ${fmtTokens(state.outputTokens)} tokens`);
+			const tokens = spinnerDisplayTokens(state, config.reducedMotion);
+			if (tokens > 0) {
+				metadata.push(`${spinnerTokenDirection(state.mode)} ${formatSpinnerTokens(tokens)} tokens`);
+			}
 		}
 	}
 	const thinking = thinkingSegment(state, config);
