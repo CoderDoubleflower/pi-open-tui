@@ -2,9 +2,32 @@ import type { Component, TUI } from "@earendil-works/pi-tui";
 
 export type NativeStatusKind = "working" | "retry" | "compaction" | "branchSummary";
 
+export interface NativeRetryStatus {
+	attempt: number;
+	maxRetries: number;
+	seconds: number;
+}
+
+export type NativeStatusPresentation =
+	| {
+		kind: "working";
+		style: "working";
+		message: string;
+	}
+	| {
+		kind: "retry";
+		style: "retry";
+		retry: NativeRetryStatus | null;
+	}
+	| {
+		kind: "retry" | "compaction" | "branchSummary";
+		style: "system-requesting";
+		message: "Compacting conversation…";
+	};
+
 export interface NativeStatusSink {
-	nativeStatusStart(token: object, kind: NativeStatusKind, message: string): void;
-	nativeStatusUpdate(token: object, message: string): void;
+	nativeStatusStart(token: object, presentation: NativeStatusPresentation): void;
+	nativeStatusUpdate(token: object, presentation: NativeStatusPresentation): void;
 	nativeStatusEnd(token: object): void;
 }
 
@@ -27,6 +50,29 @@ const STATUS_KINDS = new Set<NativeStatusKind>([
 	"compaction",
 	"branchSummary",
 ]);
+
+const PI_RETRY_MESSAGE = /Retrying\s*\((\d+)\/(\d+)\)\s*in\s*(\d+)s/i;
+
+export function parseNativeRetryStatus(message: string): NativeRetryStatus | null {
+	const match = PI_RETRY_MESSAGE.exec(message);
+	if (!match) return null;
+	const attempt = Number.parseInt(match[1]!, 10);
+	const maxRetries = Number.parseInt(match[2]!, 10);
+	const seconds = Number.parseInt(match[3]!, 10);
+	if (
+		!Number.isSafeInteger(attempt)
+		|| !Number.isSafeInteger(maxRetries)
+		|| !Number.isSafeInteger(seconds)
+		|| attempt < 1
+		|| maxRetries < 1
+		|| seconds < 0
+	) return null;
+	return { attempt, maxRetries, seconds };
+}
+
+export function formatClaudeRetryStatus(retry: NativeRetryStatus): string {
+	return `Retrying in ${retry.seconds} ${retry.seconds === 1 ? "second" : "seconds"}… (attempt ${retry.attempt}/${retry.maxRetries})`;
+}
 
 function asContainer(component: Component | undefined): ContainerLike | undefined {
 	if (!component) return undefined;
@@ -68,9 +114,29 @@ function statusMessage(component: StatusIndicatorLike, kind: NativeStatusKind): 
 		: fallbackMessage(kind);
 }
 
+function presentationFor(
+	kind: NativeStatusKind,
+	message: string,
+	replacedKind?: NativeStatusKind,
+): NativeStatusPresentation {
+	if (kind === "compaction" || kind === "branchSummary") {
+		return { kind, style: "system-requesting", message: "Compacting conversation…" };
+	}
+	if (kind === "retry") {
+		// Pi also uses RetryStatusIndicator while compaction/branch summarization
+		// retries. Claude Code keeps the system compaction spinner running for
+		// those retries instead of switching to an API retry countdown.
+		if (replacedKind === "compaction" || replacedKind === "branchSummary") {
+			return { kind, style: "system-requesting", message: "Compacting conversation…" };
+		}
+		return { kind, style: "retry", retry: parseNativeRetryStatus(message) };
+	}
+	return { kind, style: "working", message };
+}
+
 /**
  * Suppress Pi's built-in status row and mirror supported status indicators into
- * the custom spinner widget.
+ * the custom spinner widget using Claude Code's presentation semantics.
  *
  * Pi 0.84.x mounts the status container immediately before the above-editor
  * widget container. We discover that relationship from the widget instance
@@ -96,9 +162,30 @@ export function installNativeStatusBridge(
 	const activeIndicators = new Set<StatusIndicatorLike>();
 	const restoreIndicatorMethods = new Map<StatusIndicatorLike, () => void>();
 	let latestActiveIndicator: StatusIndicatorLike | undefined;
+	let pendingReplacementKind: NativeStatusKind | undefined;
+	let replacementGeneration = 0;
 	let disposed = false;
 
-	const bindIndicator = (component: Component, kind: NativeStatusKind): void => {
+	const rememberReplacementKind = (kind: NativeStatusKind): void => {
+		pendingReplacementKind = kind;
+		const generation = ++replacementGeneration;
+		queueMicrotask(() => {
+			if (replacementGeneration === generation) pendingReplacementKind = undefined;
+		});
+	};
+
+	const consumeReplacementKind = (): NativeStatusKind | undefined => {
+		const kind = pendingReplacementKind;
+		pendingReplacementKind = undefined;
+		replacementGeneration++;
+		return kind;
+	};
+
+	const bindIndicator = (
+		component: Component,
+		kind: NativeStatusKind,
+		replacedKind?: NativeStatusKind,
+	): void => {
 		const indicator = component as StatusIndicatorLike;
 		if (restoreIndicatorMethods.has(indicator)) return;
 
@@ -107,15 +194,20 @@ export function installNativeStatusBridge(
 		const hadOwnDispose = Object.prototype.hasOwnProperty.call(indicator, "dispose");
 		const originalDispose = indicator.dispose;
 		let active = true;
+		let presentation = presentationFor(kind, statusMessage(indicator, kind), replacedKind);
 
 		activeIndicators.add(indicator);
 		latestActiveIndicator = indicator;
-		sink.nativeStatusStart(indicator, kind, statusMessage(indicator, kind));
+		sink.nativeStatusStart(indicator, presentation);
 
 		if (typeof originalSetMessage === "function") {
 			indicator.setMessage = function setMessage(message: string): void {
 				originalSetMessage.call(this, message);
-				if (active) sink.nativeStatusUpdate(indicator, message);
+				if (!active) return;
+				if (presentation.style === "retry") {
+					presentation = presentationFor(kind, message);
+				}
+				sink.nativeStatusUpdate(indicator, presentation);
 			};
 		}
 
@@ -139,6 +231,7 @@ export function installNativeStatusBridge(
 					if (active) {
 						active = false;
 						activeIndicators.delete(indicator);
+						rememberReplacementKind(kind);
 						sink.nativeStatusEnd(indicator);
 					}
 					restoreIndicatorMethods.get(indicator)?.();
@@ -155,9 +248,10 @@ export function installNativeStatusBridge(
 	statusContainer.clear();
 
 	statusContainer.addChild = function addChild(component: Component): void {
+		const replacedKind = consumeReplacementKind();
 		const kind = nativeStatusKind(component);
 		if (kind) {
-			bindIndicator(component, kind);
+			bindIndicator(component, kind, replacedKind);
 			return;
 		}
 		if (isIdleStatus(component)) return;
@@ -179,6 +273,8 @@ export function installNativeStatusBridge(
 		for (const restore of restoreIndicatorMethods.values()) restore();
 		activeIndicators.clear();
 		restoreIndicatorMethods.clear();
+		pendingReplacementKind = undefined;
+		replacementGeneration++;
 
 		// If the custom spinner is disabled in the middle of retry/compaction,
 		// hand the still-live status component back to Pi immediately.
