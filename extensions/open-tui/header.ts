@@ -85,14 +85,19 @@ function logoCellColor(frame: LogoFrame, y: number, x: number): LogoColor {
 	return "panel";
 }
 
+function rgbCell(r: number, g: number, b: number): string {
+	return `\x1b[38;2;${r};${g};${b}m${LOGO_CELL}\x1b[39m`;
+}
+
 function colorCell(color: LogoColor, paintBrand: (text: string) => string): string {
 	switch (color) {
-		case "cyan": return `\x1b[36m${LOGO_CELL}\x1b[39m`;
-		case "red": return `\x1b[31m${LOGO_CELL}\x1b[39m`;
-		case "green": return `\x1b[32m${LOGO_CELL}\x1b[39m`;
-		case "orange":
-		case "flash": return `\x1b[33m${LOGO_CELL}\x1b[39m`;
-		case "white": return `\x1b[39m${LOGO_CELL}`;
+		// Claude Code Dark Theme subagent palette.
+		case "cyan": return rgbCell(8, 145, 178);
+		case "red": return rgbCell(220, 38, 38);
+		case "green": return rgbCell(22, 163, 74);
+		case "orange": return rgbCell(234, 88, 12);
+		case "flash": return rgbCell(255, 193, 7);
+		case "white": return rgbCell(255, 255, 255);
 		case "brand": return paintBrand(LOGO_CELL);
 		default: return " ".repeat(LOGO_CELL.length);
 	}

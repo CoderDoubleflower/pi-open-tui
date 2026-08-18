@@ -57,9 +57,9 @@ test("renders full-width horizontal borders and a fixed prompt", () => {
 	const body = lines[1] ?? "";
 
 	assert.equal(stripAnsi(top), "─".repeat(40));
-	assert.match(top, /^\x1b\[38;2;103;103;103m/);
+	assert.match(top, /^\x1b\[38;2;136;136;136m/);
 	assert.equal(stripAnsi(body).indexOf("❯ hi"), 0);
-	assert.match(body, /^\x1b\[38;2;181;181;181m❯\x1b\[0m /);
+	assert.match(body, /^\x1b\[38;2;255;255;255m❯\x1b\[0m /);
 	assert.equal(painted, "─", "the base editor may paint its internal border before it is replaced");
 });
 
@@ -101,30 +101,30 @@ test("shows the prompt on an empty editor and indents continuation lines", () =>
 	assert.ok(lines.every((line) => line.length === 20));
 });
 
-test("uses dedicated colors for selected and unselected autocomplete items", () => {
+test("uses Claude Code colors for selected and dim styling for unselected autocomplete items", () => {
 	const selected = paintAutocompleteLine("\x1b[31m→ selected\x1b[0m");
 	const unselected = paintAutocompleteLine("  unselected");
 
-	assert.equal(selected, "\x1b[38;2;175;215;255m  selected\x1b[0m");
-	assert.equal(unselected, "\x1b[38;2;122;122;122m  unselected\x1b[0m");
+	assert.equal(selected, "\x1b[38;2;177;185;249m  selected\x1b[0m");
+	assert.equal(unselected, "\x1b[2m  unselected\x1b[0m");
 });
 
 test("prefixes slash-command items at the input content column", () => {
 	const selected = paintAutocompleteLine("\x1b[31m→ selected\x1b[0m", true);
 	const unselected = paintAutocompleteLine("  unselected", true);
 
-	assert.equal(selected, "\x1b[38;2;175;215;255m/selected\x1b[0m");
-	assert.equal(unselected, "\x1b[38;2;122;122;122m/unselected\x1b[0m");
+	assert.equal(selected, "\x1b[38;2;177;185;249m/selected\x1b[0m");
+	assert.equal(unselected, "\x1b[2m/unselected\x1b[0m");
 });
 
 test("does not prefix autocomplete metadata or duplicate an existing slash", () => {
 	assert.equal(
 		paintAutocompleteLine("  (1/10)", true),
-		"\x1b[38;2;122;122;122m  (1/10)\x1b[0m",
+		"\x1b[2m  (1/10)\x1b[0m",
 	);
 	assert.equal(
 		paintAutocompleteLine("  /already-prefixed", true),
-		"\x1b[38;2;122;122;122m/already-prefixed\x1b[0m",
+		"\x1b[2m/already-prefixed\x1b[0m",
 	);
 });
 

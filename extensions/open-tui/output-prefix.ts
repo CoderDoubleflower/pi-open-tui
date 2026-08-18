@@ -12,16 +12,16 @@ const ASSISTANT_DOT = "●";
 const THINKING_MARK = "∴";
 const PREFIX_GAP = " ";
 const RGB_RESET = "\x1b[39m";
+const DIM = "\x1b[2m";
+const DIM_RESET = "\x1b[22m";
 
-const TOOL_COLORS = {
-	preparing: [153, 153, 153],
-	running: [215, 119, 87],
+const TOOL_RESULT_COLORS = {
 	success: [78, 186, 101],
 	failure: [255, 107, 128],
 } as const;
 
 type PrefixKind = "thinking" | "text";
-export type ToolExecutionStatus = keyof typeof TOOL_COLORS;
+export type ToolExecutionStatus = "preparing" | "running" | keyof typeof TOOL_RESULT_COLORS;
 
 interface MutableContainer extends Component {
 	children: Component[];
@@ -313,7 +313,10 @@ function isRenderRequester(value: unknown): value is RenderRequester {
 
 function toolPrefix(status: ToolExecutionStatus, blink: ToolBlinkController): string {
 	if (status === "running" && !blink.isLit()) return " ";
-	const [r, g, b] = TOOL_COLORS[status];
+	if (status === "preparing" || status === "running") {
+		return `${DIM}${ASSISTANT_DOT}${DIM_RESET}`;
+	}
+	const [r, g, b] = TOOL_RESULT_COLORS[status];
 	return rgb(r, g, b, ASSISTANT_DOT);
 }
 
