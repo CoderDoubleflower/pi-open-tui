@@ -1,6 +1,6 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { AssistantMessageComponent } from "@earendil-works/pi-coding-agent";
-import { Markdown, type Component } from "@earendil-works/pi-tui";
+import type { Component } from "@earendil-works/pi-tui";
 import { stripAnsi } from "./utils.ts";
 
 interface MutableContainer extends Component {
@@ -11,7 +11,7 @@ interface AssistantInternals {
 	contentContainer?: unknown;
 }
 
-interface AssistantPrototype {
+export interface AssistantPrototype {
 	updateContent(message: AssistantMessage, isStreaming?: boolean): void;
 }
 
@@ -28,7 +28,16 @@ type RenderToken = (
 ) => string[];
 
 interface MarkdownInternals {
+	renderToken?: RenderToken;
+}
+
+interface PatchedMarkdownPrototype extends MarkdownInternals {
 	renderToken: RenderToken;
+}
+
+interface PrototypePatch {
+	previous: RenderToken;
+	patched: RenderToken;
 }
 
 function isComponent(value: unknown): value is Component {
@@ -47,13 +56,6 @@ function isMutableContainer(value: unknown): value is MutableContainer {
 function isMarkdownComponent(value: Component): boolean {
 	return value.constructor.name === "Markdown"
 		&& typeof (value as Component & { setText?: unknown }).setText === "function";
-}
-
-function markAssistantMarkdown(component: AssistantInternals, markdown: WeakSet<object>): void {
-	if (!isMutableContainer(component.contentContainer)) return;
-	for (const child of component.contentContainer.children) {
-		if (isMarkdownComponent(child)) markdown.add(child as object);
-	}
 }
 
 function stripRenderedCodeFences(lines: string[]): string[] {
@@ -77,42 +79,22 @@ function stripRenderedCodeFences(lines: string[]): string[] {
 	return result;
 }
 
-/**
- * Make assistant fenced code blocks render like Claude Code: keep Pi's native
- * Markdown parsing, language detection, syntax highlighting, wrapping, and
- * spacing, but omit the literal opening/closing triple-backtick fence lines.
- *
- * The patch is intentionally scoped to Markdown components created by
- * AssistantMessageComponent, so standalone/user/extension Markdown keeps Pi's
- * upstream rendering behavior.
- */
-export function installClaudeStyleMarkdown(): () => void {
-	const assistantMarkdown = new WeakSet<object>();
-	const assistantPrototype = AssistantMessageComponent.prototype as unknown as AssistantPrototype;
-	const markdownPrototype = Markdown.prototype as unknown as MarkdownInternals;
-	const previousUpdateContent = assistantPrototype.updateContent;
-	const previousRenderToken = markdownPrototype.renderToken;
+function patchRuntimeMarkdownPrototype(
+	component: Component,
+	assistantMarkdown: WeakSet<object>,
+	prototypePatches: Map<PatchedMarkdownPrototype, PrototypePatch>,
+): void {
+	// Do not patch the Markdown class imported by the extension. Pi may load the
+	// extension through a different module graph than the interactive renderer.
+	// Instead, discover the prototype from the concrete Markdown instance that
+	// AssistantMessageComponent just created and patch that exact runtime class.
+	const prototype = Object.getPrototypeOf(component) as MarkdownInternals | null;
+	if (!prototype || typeof prototype.renderToken !== "function") return;
 
-	// Pi currently exposes renderToken as a normal prototype method even though
-	// it is private in TypeScript. If a future Pi release changes that internal,
-	// fail open and preserve upstream rendering rather than breaking the TUI.
-	if (typeof previousUpdateContent !== "function" || typeof previousRenderToken !== "function") {
-		return () => {};
-	}
+	const runtimePrototype = prototype as PatchedMarkdownPrototype;
+	if (prototypePatches.has(runtimePrototype)) return;
 
-	const patchedUpdateContent = function (
-		this: AssistantInternals,
-		message: AssistantMessage,
-		isStreaming?: boolean,
-	): void {
-		previousUpdateContent.call(this, message, isStreaming);
-		try {
-			markAssistantMarkdown(this, assistantMarkdown);
-		} catch {
-			// Unknown future assistant internals keep Pi's original rendering.
-		}
-	};
-
+	const previousRenderToken = runtimePrototype.renderToken;
 	const patchedRenderToken: RenderToken = function (
 		this: MarkdownInternals,
 		token: MarkdownToken,
@@ -125,16 +107,73 @@ export function installClaudeStyleMarkdown(): () => void {
 		return stripRenderedCodeFences(lines);
 	};
 
+	runtimePrototype.renderToken = patchedRenderToken;
+	prototypePatches.set(runtimePrototype, {
+		previous: previousRenderToken,
+		patched: patchedRenderToken,
+	});
+}
+
+function markAssistantMarkdown(
+	component: AssistantInternals,
+	assistantMarkdown: WeakSet<object>,
+	prototypePatches: Map<PatchedMarkdownPrototype, PrototypePatch>,
+): void {
+	if (!isMutableContainer(component.contentContainer)) return;
+	for (const child of component.contentContainer.children) {
+		if (!isMarkdownComponent(child)) continue;
+		assistantMarkdown.add(child as object);
+		patchRuntimeMarkdownPrototype(child, assistantMarkdown, prototypePatches);
+	}
+}
+
+/**
+ * Make assistant fenced code blocks render like Claude Code: keep Pi's native
+ * Markdown parsing, language detection, syntax highlighting, wrapping, and
+ * spacing, but omit the literal opening/closing triple-backtick fence lines.
+ *
+ * The patch is intentionally scoped to Markdown components created by
+ * AssistantMessageComponent, so standalone/user/extension Markdown keeps Pi's
+ * upstream rendering behavior.
+ */
+export function installClaudeStyleMarkdown(
+	assistantPrototype: AssistantPrototype = AssistantMessageComponent.prototype,
+): () => void {
+	const assistantMarkdown = new WeakSet<object>();
+	const prototypePatches = new Map<PatchedMarkdownPrototype, PrototypePatch>();
+	const previousUpdateContent = assistantPrototype.updateContent;
+
+	if (typeof previousUpdateContent !== "function") {
+		return () => {};
+	}
+
+	const patchedUpdateContent = function (
+		this: AssistantInternals,
+		message: AssistantMessage,
+		isStreaming?: boolean,
+	): void {
+		previousUpdateContent.call(this, message, isStreaming);
+		try {
+			markAssistantMarkdown(this, assistantMarkdown, prototypePatches);
+		} catch {
+			// Unknown future assistant/Markdown internals keep Pi's original rendering.
+		}
+	};
+
 	assistantPrototype.updateContent = patchedUpdateContent;
-	markdownPrototype.renderToken = patchedRenderToken;
 
 	let cleaned = false;
 	return () => {
 		if (cleaned) return;
 		cleaned = true;
-		if (markdownPrototype.renderToken === patchedRenderToken) {
-			markdownPrototype.renderToken = previousRenderToken;
+
+		for (const [prototype, patch] of prototypePatches) {
+			if (prototype.renderToken === patch.patched) {
+				prototype.renderToken = patch.previous;
+			}
 		}
+		prototypePatches.clear();
+
 		if (assistantPrototype.updateContent === patchedUpdateContent) {
 			assistantPrototype.updateContent = previousUpdateContent;
 		}
