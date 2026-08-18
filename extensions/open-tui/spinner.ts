@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { SpinnerConfig } from "./config.ts";
+import type { NativeStatusKind } from "./native-status-bridge.ts";
 import { TURN_COMPLETION_VERBS } from "./spinner-completion-verbs.ts";
 import { resolveSpinnerMessage } from "./spinner-content.ts";
 import {
@@ -70,6 +71,12 @@ function renderSignature(snapshot: SpinnerWidgetSnapshot): string {
 	]);
 }
 
+interface NativeStatusState {
+	token: object;
+	kind: Exclude<NativeStatusKind, "working">;
+	message: string;
+}
+
 export class SpinnerController implements SpinnerWidgetSource {
 	readonly stateMachine: SpinnerStateMachine;
 	private readonly getConfig: () => SpinnerConfig;
@@ -80,6 +87,7 @@ export class SpinnerController implements SpinnerWidgetSource {
 	private requestRender: (() => void) | undefined;
 	private lastRenderSignature = "";
 	private completionVerb = "Worked";
+	private nativeStatus: NativeStatusState | undefined;
 	private disposed = false;
 
 	constructor(
@@ -123,6 +131,20 @@ export class SpinnerController implements SpinnerWidgetSource {
 	getWidgetSnapshot(): SpinnerWidgetSnapshot {
 		const config = this.getConfig();
 		const content = this.eventStore.content;
+		const hasAttachedTodos = this.eventStore.hasTasks(TODO_SPINNER_SOURCE);
+		if (this.nativeStatus) {
+			return {
+				phase: "running",
+				active: true,
+				message: this.nativeStatus.message,
+				completionVerb: this.completionVerb,
+				completedDurationMs: null,
+				hasAttachedTodos,
+				reducedMotion: config.reducedMotion,
+				stalledIntensity: 0,
+			};
+		}
+
 		const baseMessage = resolveSpinnerMessage({
 			overrideMessage: content.overrideMessage,
 			currentTask: config.taskIntegration === "events" ? content.currentTask : null,
@@ -140,14 +162,34 @@ export class SpinnerController implements SpinnerWidgetSource {
 			}),
 			completionVerb: this.completionVerb,
 			completedDurationMs: this.state.agentCompletedDurationMs,
-			hasAttachedTodos: this.eventStore.hasTasks(TODO_SPINNER_SOURCE),
+			hasAttachedTodos,
 			reducedMotion: config.reducedMotion,
 			stalledIntensity: config.showStall ? this.state.stalledIntensity : 0,
 		};
 	}
 
+	nativeStatusStart(token: object, kind: NativeStatusKind, message: string): void {
+		if (this.disposed || kind === "working") return;
+		this.stateMachine.hide();
+		this.nativeStatus = { token, kind, message };
+		this.publish();
+	}
+
+	nativeStatusUpdate(token: object, message: string): void {
+		if (this.disposed || this.nativeStatus?.token !== token) return;
+		this.nativeStatus.message = message;
+		this.publish();
+	}
+
+	nativeStatusEnd(token: object): void {
+		if (this.disposed || this.nativeStatus?.token !== token) return;
+		this.nativeStatus = undefined;
+		this.publish();
+	}
+
 	agentStart(level: string | null, reasoning: boolean): void {
 		if (this.disposed) return;
+		this.nativeStatus = undefined;
 		this.stateMachine.agentStart(effortValue(level, reasoning));
 		this.publish();
 	}
@@ -208,6 +250,7 @@ export class SpinnerController implements SpinnerWidgetSource {
 	dispose(): void {
 		if (this.disposed) return;
 		this.disposed = true;
+		this.nativeStatus = undefined;
 		this.stateMachine.hide();
 		this.eventStore.dispose();
 		this.suffixStore.dispose();
