@@ -2,6 +2,10 @@ import type { Theme, ThemeColor } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth } from "@earendil-works/pi-tui";
 import type { Component, TUI } from "@earendil-works/pi-tui";
 import {
+	installNativeStatusBridge,
+	type NativeStatusSink,
+} from "./native-status-bridge.ts";
+import {
 	buildPingPongFrames,
 	SPINNER_GLYPHS,
 	type SpinnerPlatform,
@@ -11,6 +15,7 @@ import { formatDuration } from "./utils.ts";
 
 export const SPINNER_WIDGET_KEY = "open-tui-spinner";
 export const SPINNER_WIDGET_INTERVAL_MS = 120;
+const MAX_NATIVE_STATUS_BRIDGE_ATTEMPTS = 8;
 
 export interface SpinnerWidgetSnapshot {
 	phase: SpinnerPhase;
@@ -23,7 +28,7 @@ export interface SpinnerWidgetSnapshot {
 	stalledIntensity: number;
 }
 
-export interface SpinnerWidgetSource {
+export interface SpinnerWidgetSource extends NativeStatusSink {
 	getWidgetSnapshot(): SpinnerWidgetSnapshot;
 	setRequestRender(requestRender: (() => void) | undefined): void;
 }
@@ -47,6 +52,8 @@ export function createSpinnerWidget(
 	const frames = buildPingPongFrames(SPINNER_GLYPHS[platform]);
 	let frameIndex = 0;
 	let disposed = false;
+	let bridgeAttempts = 0;
+	let cleanupNativeStatusBridge: (() => void) | undefined;
 
 	const requestRender = () => {
 		if (!disposed) tui.requestRender();
@@ -62,16 +69,23 @@ export function createSpinnerWidget(
 	}, SPINNER_WIDGET_INTERVAL_MS);
 	animationTimer.unref?.();
 
-	return {
+	const component: Component & { dispose(): void } = {
 		dispose() {
 			if (disposed) return;
 			disposed = true;
 			clearInterval(animationTimer);
+			cleanupNativeStatusBridge?.();
+			cleanupNativeStatusBridge = undefined;
 			source.setRequestRender(undefined);
 		},
 		invalidate() {},
 		render(width: number): string[] {
 			if (disposed || width <= 0) return [];
+			if (!cleanupNativeStatusBridge && bridgeAttempts < MAX_NATIVE_STATUS_BRIDGE_ATTEMPTS) {
+				bridgeAttempts++;
+				cleanupNativeStatusBridge = installNativeStatusBridge(tui, component, source);
+			}
+
 			const snapshot = source.getWidgetSnapshot();
 			if (snapshot.phase === "hidden") return [];
 
@@ -95,4 +109,6 @@ export function createSpinnerWidget(
 			return withEditorGap(truncateToWidth(line, width, ellipsis), snapshot.hasAttachedTodos);
 		},
 	};
+
+	return component;
 }
