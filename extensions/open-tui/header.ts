@@ -1,5 +1,6 @@
 import { VERSION, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { Component, TUI } from "@earendil-works/pi-tui";
+import { applyFullscreenWheelScrollLines } from "./fullscreen-scroll.ts";
 import {
 	center,
 	collectPiCommandNames,
@@ -234,9 +235,10 @@ export class OpenTuiHeader implements Component {
 	dispose(): void {}
 }
 
-export function installHeader(pi: ExtensionAPI, ctx: ExtensionContext): () => void {
+export function installHeader(pi: ExtensionAPI, ctx: ExtensionContext, wheelScrollLines: number): () => void {
 	let header: OpenTuiHeader | undefined;
 	ctx.ui.setHeader((tui) => {
+		applyFullscreenWheelScrollLines(tui, wheelScrollLines);
 		header?.dispose();
 		header = new OpenTuiHeader(pi, ctx, tui);
 		return header;
