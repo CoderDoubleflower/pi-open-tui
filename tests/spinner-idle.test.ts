@@ -43,7 +43,7 @@ const theme = {
 	fg: (color: string, text: string) => `<${color}>${text}</${color}>`,
 } as Theme;
 
-test("agent end freezes a Claude-style worked duration while compaction fully hides it", () => {
+test("agent end freezes a Claude-style randomized completion duration while compaction fully hides it", () => {
 	const clock = new FakeClock();
 	const events = new FakeEventBus();
 	const config = structuredClone(DEFAULT_CONFIG.spinner);
@@ -82,7 +82,7 @@ test("agent end freezes a Claude-style worked duration while compaction fully hi
 	assert.equal(controller.state.agentCompletedDurationMs, 5_000);
 	assert.equal(controller.state.stalledIntensity, 0);
 	assert.equal(controller.state.activeToolIds.size, 0);
-	assert.match(widget.render(120)[0] ?? "", /✻ Worked for 5s/);
+	assert.match(widget.render(120)[0] ?? "", /✻ Baked for 5s/);
 	assert.equal(widget.render(120)[1], "");
 
 	const idleRenderRequests = renderRequests;
@@ -92,7 +92,7 @@ test("agent end freezes a Claude-style worked duration while compaction fully hi
 	assert.equal(controller.state.agentCompletedDurationMs, 5_000);
 	assert.equal(controller.state.stalledIntensity, 0);
 	assert.equal(renderRequests, idleRenderRequests);
-	assert.match(widget.render(120)[0] ?? "", /✻ Worked for 5s/);
+	assert.match(widget.render(120)[0] ?? "", /✻ Baked for 5s/);
 
 	controller.beforeCompact();
 	assert.equal(controller.state.phase, "hidden");

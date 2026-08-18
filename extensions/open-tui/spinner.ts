@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { SpinnerConfig } from "./config.ts";
+import { TURN_COMPLETION_VERBS } from "./spinner-completion-verbs.ts";
 import { resolveSpinnerMessage } from "./spinner-content.ts";
 import {
 	SPINNER_MOUNTED_EVENT,
@@ -61,6 +62,7 @@ function renderSignature(snapshot: SpinnerWidgetSnapshot): string {
 		snapshot.phase,
 		snapshot.active,
 		snapshot.message,
+		snapshot.completionVerb,
 		snapshot.completedDurationMs,
 		snapshot.hasAttachedTodos,
 		snapshot.reducedMotion,
@@ -77,6 +79,7 @@ export class SpinnerController implements SpinnerWidgetSource {
 	private readonly suffixStore: SpinnerSuffixStore;
 	private requestRender: (() => void) | undefined;
 	private lastRenderSignature = "";
+	private completionVerb = "Worked";
 	private disposed = false;
 
 	constructor(
@@ -135,6 +138,7 @@ export class SpinnerController implements SpinnerWidgetSource {
 				baseMessage,
 				suffix: config.showSuffix ? this.suffixStore.suffix : null,
 			}),
+			completionVerb: this.completionVerb,
 			completedDurationMs: this.state.agentCompletedDurationMs,
 			hasAttachedTodos: this.eventStore.hasTasks(TODO_SPINNER_SOURCE),
 			reducedMotion: config.reducedMotion,
@@ -150,7 +154,11 @@ export class SpinnerController implements SpinnerWidgetSource {
 
 	agentEnd(): void {
 		if (this.disposed) return;
+		const wasRunning = this.state.phase === "running";
 		this.stateMachine.agentEnd();
+		if (wasRunning) {
+			this.completionVerb = this.dependencies.random.pick(TURN_COMPLETION_VERBS);
+		}
 		this.eventStore.agentEnd();
 		this.suffixStore.agentEnd();
 		this.publish();

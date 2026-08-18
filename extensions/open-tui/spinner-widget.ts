@@ -16,6 +16,7 @@ export interface SpinnerWidgetSnapshot {
 	phase: SpinnerPhase;
 	active: boolean;
 	message?: string;
+	completionVerb: string;
 	completedDurationMs: number | null;
 	hasAttachedTodos: boolean;
 	reducedMotion: boolean;
@@ -78,7 +79,7 @@ export function createSpinnerWidget(
 			if (snapshot.phase === "idle") {
 				const duration = formatDuration(snapshot.completedDurationMs ?? 0);
 				const line = truncateToWidth(
-					theme.fg("dim", `✻ Worked for ${duration}`),
+					theme.fg("dim", `✻ ${snapshot.completionVerb || "Worked"} for ${duration}`),
 					width,
 					ellipsis,
 				);
