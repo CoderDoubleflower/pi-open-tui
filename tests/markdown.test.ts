@@ -9,7 +9,7 @@ import {
 import { Markdown as PiMarkdown, type Component } from "@earendil-works/pi-tui";
 import {
 	installClaudeStyleMarkdown,
-	stabilizeStreamingMarkdown,
+	stabilizeStreamingLinkText,
 	type AssistantPrototype,
 } from "../extensions/open-tui/markdown.ts";
 import { stripAnsi } from "../extensions/open-tui/utils.ts";
@@ -47,26 +47,24 @@ function hasFenceLine(text: string): boolean {
 }
 
 test("holds an incomplete trailing Markdown link until its destination closes", () => {
-	assert.equal(stabilizeStreamingMarkdown("See [src/foo.ts]"), "See ");
-	assert.equal(stabilizeStreamingMarkdown("See [src/foo.ts]("), "See ");
+	assert.equal(stabilizeStreamingLinkText("See [src/foo.ts]"), "See ");
+	assert.equal(stabilizeStreamingLinkText("See [src/foo.ts]("), "See ");
 	assert.equal(
-		stabilizeStreamingMarkdown("See [src/foo.ts](file:///workspace/src/foo.ts"),
+		stabilizeStreamingLinkText("See [src/foo.ts](file:///workspace/src/foo.ts"),
 		"See ",
 	);
-	assert.equal(stabilizeStreamingMarkdown("See [file](path(with)paren"), "See ");
+	assert.equal(stabilizeStreamingLinkText("See [file](path(with)paren"), "See ");
 
 	const complete = "See [file](path(with)paren)";
-	assert.equal(stabilizeStreamingMarkdown(complete), complete);
+	assert.equal(stabilizeStreamingLinkText(complete), complete);
 });
 
-test("does not hide link-like source inside inline or fenced code", () => {
-	const inline = "`[src/foo.ts](file:///workspace/src/foo.ts`";
-	const fenced = "```md\n[src/foo.ts](file:///workspace/src/foo.ts\n```";
+test("leaves complete and escaped link-like text unchanged", () => {
+	const complete = "See [src/foo.ts](file:///workspace/src/foo.ts)";
 	const escaped = "See \\[src/foo.ts](";
 
-	assert.equal(stabilizeStreamingMarkdown(inline), inline);
-	assert.equal(stabilizeStreamingMarkdown(fenced), fenced);
-	assert.equal(stabilizeStreamingMarkdown(escaped), escaped);
+	assert.equal(stabilizeStreamingLinkText(complete), complete);
+	assert.equal(stabilizeStreamingLinkText(escaped), escaped);
 });
 
 test("assistant fenced code keeps the body but hides literal Markdown fences", () => {
@@ -230,7 +228,7 @@ test("streaming assistant links stay plain until the message finalizes", () => {
 
 		render(_width: number): string[] {
 			const match = /^(.*)\[([^\]]+)]\(([^)]+)\)(.*)$/s.exec(this.text);
-			if (!match) return [this.text];
+			if (!match) return [this.renderInlineTokens([{ type: "text", text: this.text }])];
 			return [
 				this.renderInlineTokens([
 					{ type: "text", text: match[1] },
