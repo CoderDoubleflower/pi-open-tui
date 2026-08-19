@@ -9,6 +9,7 @@ import {
 import { Markdown as PiMarkdown, type Component } from "@earendil-works/pi-tui";
 import {
 	installClaudeStyleMarkdown,
+	stabilizeStreamingMarkdown,
 	type AssistantPrototype,
 } from "../extensions/open-tui/markdown.ts";
 import { stripAnsi } from "../extensions/open-tui/utils.ts";
@@ -44,6 +45,29 @@ function renderPlain(component: { render(width: number): string[] }, width = 80)
 function hasFenceLine(text: string): boolean {
 	return text.split("\n").some((line) => line.trim().startsWith("```"));
 }
+
+test("holds an incomplete trailing Markdown link until its destination closes", () => {
+	assert.equal(stabilizeStreamingMarkdown("See [src/foo.ts]"), "See ");
+	assert.equal(stabilizeStreamingMarkdown("See [src/foo.ts]("), "See ");
+	assert.equal(
+		stabilizeStreamingMarkdown("See [src/foo.ts](file:///workspace/src/foo.ts"),
+		"See ",
+	);
+	assert.equal(stabilizeStreamingMarkdown("See [file](path(with)paren"), "See ");
+
+	const complete = "See [file](path(with)paren)";
+	assert.equal(stabilizeStreamingMarkdown(complete), complete);
+});
+
+test("does not hide link-like source inside inline or fenced code", () => {
+	const inline = "`[src/foo.ts](file:///workspace/src/foo.ts`";
+	const fenced = "```md\n[src/foo.ts](file:///workspace/src/foo.ts\n```";
+	const escaped = "See \\[src/foo.ts](";
+
+	assert.equal(stabilizeStreamingMarkdown(inline), inline);
+	assert.equal(stabilizeStreamingMarkdown(fenced), fenced);
+	assert.equal(stabilizeStreamingMarkdown(escaped), escaped);
+});
 
 test("assistant fenced code keeps the body but hides literal Markdown fences", () => {
 	const cleanup = installClaudeStyleMarkdown();
@@ -159,6 +183,102 @@ test("discovers and patches the concrete Markdown prototype created by the assis
 		// assistant Markdown instances that were marked by updateContent.
 		const unrelated = new Markdown();
 		assert.equal(hasFenceLine(renderPlain(unrelated)), true);
+	} finally {
+		cleanup();
+	}
+});
+
+test("streaming assistant links stay plain until the message finalizes", () => {
+	type InlineToken = {
+		type?: string;
+		text?: string;
+		tokens?: InlineToken[];
+	};
+
+	class FakeContainer implements Component {
+		children: Component[] = [];
+
+		render(width: number): string[] {
+			return this.children.flatMap((child) => child.render(width));
+		}
+
+		invalidate(): void {}
+	}
+
+	class Markdown implements Component {
+		private text: string;
+
+		constructor(text: string) {
+			this.text = text;
+		}
+
+		setText(text: string): void {
+			this.text = text;
+		}
+
+		renderInlineTokens(tokens: InlineToken[]): string {
+			let result = "";
+			for (const token of tokens) {
+				if (token.type === "link") {
+					result += `<link>${this.renderInlineTokens(token.tokens ?? [])}</link>`;
+				} else if (token.type === "text") {
+					result += token.tokens?.length ? this.renderInlineTokens(token.tokens) : (token.text ?? "");
+				}
+			}
+			return result;
+		}
+
+		render(_width: number): string[] {
+			const match = /^(.*)\[([^\]]+)]\(([^)]+)\)(.*)$/s.exec(this.text);
+			if (!match) return [this.text];
+			return [
+				this.renderInlineTokens([
+					{ type: "text", text: match[1] },
+					{
+						type: "link",
+						text: match[2],
+						tokens: [{ type: "text", text: match[2] }],
+					},
+					{ type: "text", text: match[4] },
+				]),
+			];
+		}
+
+		invalidate(): void {}
+	}
+
+	class FakeAssistant {
+		contentContainer = new FakeContainer();
+		isStreaming = false;
+
+		updateContent(message: AssistantMessage, isStreaming = this.isStreaming): void {
+			this.isStreaming = isStreaming;
+			const text = message.content.find((part) => part.type === "text")?.text ?? "";
+			this.contentContainer.children = text ? [new Markdown(text)] : [];
+		}
+	}
+
+	const completeLink = "See [src/foo.ts](file:///workspace/src/foo.ts)";
+	const cleanup = installClaudeStyleMarkdown(FakeAssistant.prototype as AssistantPrototype);
+	try {
+		const assistant = new FakeAssistant();
+		assistant.updateContent(assistantMessage(completeLink.slice(0, -1)), true);
+		assert.equal(renderPlain(assistant.contentContainer), "See ");
+
+		assistant.updateContent(assistantMessage(completeLink), true);
+		assert.equal(renderPlain(assistant.contentContainer), "See src/foo.ts");
+
+		// The runtime prototype patch remains scoped to marked streaming assistant
+		// instances; unrelated Markdown keeps its native link rendering.
+		assert.equal(renderPlain(new Markdown(completeLink)), "See <link>src/foo.ts</link>");
+
+		assistant.updateContent(assistantMessage(completeLink), false);
+		assert.equal(renderPlain(assistant.contentContainer), "See <link>src/foo.ts</link>");
+
+		cleanup();
+		const restored = new FakeAssistant();
+		restored.updateContent(assistantMessage(completeLink), true);
+		assert.equal(renderPlain(restored.contentContainer), "See <link>src/foo.ts</link>");
 	} finally {
 		cleanup();
 	}
