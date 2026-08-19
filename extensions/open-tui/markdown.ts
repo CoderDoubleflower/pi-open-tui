@@ -19,8 +19,8 @@ export interface AssistantPrototype {
 type MarkdownToken = {
 	type?: string;
 	text?: string;
+	raw?: string;
 	tokens?: MarkdownToken[];
-	[key: string]: unknown;
 };
 
 type RenderToken = (
@@ -51,11 +51,6 @@ interface PrototypePatch {
 	patchedRenderInlineTokens?: RenderInlineTokens;
 }
 
-interface FenceState {
-	marker: "`" | "~";
-	length: number;
-}
-
 function isComponent(value: unknown): value is Component {
 	return !!value
 		&& typeof value === "object"
@@ -74,38 +69,12 @@ function isMarkdownComponent(value: Component): boolean {
 		&& typeof (value as Component & { setText?: unknown }).setText === "function";
 }
 
-function countRun(text: string, index: number, character: string): number {
-	let cursor = index;
-	while (text[cursor] === character) cursor++;
-	return cursor - index;
-}
-
 function isEscaped(text: string, index: number): boolean {
 	let backslashes = 0;
 	for (let cursor = index - 1; cursor >= 0 && text[cursor] === "\\"; cursor--) {
 		backslashes++;
 	}
 	return backslashes % 2 === 1;
-}
-
-function readFence(text: string, lineStart: number): FenceState | undefined {
-	let cursor = lineStart;
-	let spaces = 0;
-	while (spaces < 4 && text[cursor] === " ") {
-		cursor++;
-		spaces++;
-	}
-	if (spaces > 3) return undefined;
-
-	const marker = text[cursor];
-	if (marker !== "`" && marker !== "~") return undefined;
-	const length = countRun(text, cursor, marker);
-	return length >= 3 ? { marker, length } : undefined;
-}
-
-function nextLineStart(text: string, lineStart: number): number {
-	const newline = text.indexOf("\n", lineStart);
-	return newline < 0 ? text.length : newline + 1;
 }
 
 function findClosingDestination(text: string, openingIndex: number): number {
@@ -139,132 +108,82 @@ function findClosingReference(text: string, openingIndex: number): number {
 	return -1;
 }
 
-function findUnstableMarkdownTailStart(markdown: string): number | undefined {
+function findUnstableLinkTextStart(text: string): number | undefined {
 	const bracketStack: number[] = [];
-	let fence: FenceState | undefined;
-	let inlineCodeTicks = 0;
-	let index = 0;
 
-	while (index < markdown.length) {
-		const atLineStart = index === 0 || markdown[index - 1] === "\n";
-		if (atLineStart && inlineCodeTicks === 0) {
-			const candidate = readFence(markdown, index);
-			if (fence) {
-				if (candidate?.marker === fence.marker && candidate.length >= fence.length) {
-					fence = undefined;
-				}
-				index = nextLineStart(markdown, index);
-				continue;
-			}
-			if (candidate) {
-				fence = candidate;
-				index = nextLineStart(markdown, index);
-				continue;
-			}
-		}
-
-		if (fence) {
-			index = nextLineStart(markdown, index);
-			continue;
-		}
-
-		const character = markdown[index];
-		if (character === "\\") {
-			index = Math.min(markdown.length, index + 2);
-			continue;
-		}
-
-		if (character === "`") {
-			const runLength = countRun(markdown, index, "`");
-			if (inlineCodeTicks === 0) {
-				inlineCodeTicks = runLength;
-			} else if (runLength === inlineCodeTicks) {
-				inlineCodeTicks = 0;
-			}
-			index += runLength;
-			continue;
-		}
-
-		if (inlineCodeTicks > 0) {
+	for (let index = 0; index < text.length; index++) {
+		if (text[index] === "\\") {
 			index++;
 			continue;
 		}
 
-		if (character === "[") {
-			const syntaxStart = index > 0 && markdown[index - 1] === "!" && !isEscaped(markdown, index - 1)
+		if (text[index] === "[") {
+			const syntaxStart = index > 0 && text[index - 1] === "!" && !isEscaped(text, index - 1)
 				? index - 1
 				: index;
 			bracketStack.push(syntaxStart);
-			index++;
 			continue;
 		}
 
-		if (character === "]" && bracketStack.length > 0) {
-			const syntaxStart = bracketStack.pop()!;
-			const unstableStart = bracketStack[0] ?? syntaxStart;
-			const nextIndex = index + 1;
-			if (nextIndex >= markdown.length) return unstableStart;
+		if (text[index] !== "]" || bracketStack.length === 0) continue;
 
-			if (markdown[nextIndex] === "(") {
-				const closingIndex = findClosingDestination(markdown, nextIndex);
-				if (closingIndex < 0) return unstableStart;
-				index = closingIndex + 1;
-				continue;
-			}
+		const syntaxStart = bracketStack.pop()!;
+		const unstableStart = bracketStack[0] ?? syntaxStart;
+		const nextIndex = index + 1;
+		if (nextIndex >= text.length) return unstableStart;
 
-			if (markdown[nextIndex] === "[") {
-				const closingIndex = findClosingReference(markdown, nextIndex);
-				if (closingIndex < 0) return unstableStart;
-				index = closingIndex + 1;
-				continue;
-			}
+		if (text[nextIndex] === "(") {
+			const closingIndex = findClosingDestination(text, nextIndex);
+			if (closingIndex < 0) return unstableStart;
+			index = closingIndex;
+			continue;
 		}
 
-		index++;
+		if (text[nextIndex] === "[") {
+			const closingIndex = findClosingReference(text, nextIndex);
+			if (closingIndex < 0) return unstableStart;
+			index = closingIndex;
+		}
 	}
 
 	return bracketStack[0];
 }
 
 /**
- * Keep an ambiguous trailing Markdown link out of the streaming frame until its
- * label/destination is complete. Otherwise Pi first paints the raw source and
- * then shrinks it into a styled link when the closing delimiter arrives.
+ * Remove an ambiguous link-shaped suffix from a streaming plain-text token.
+ * Marked emits incomplete Markdown links as text, then replaces that text with
+ * a much shorter link token when the closing delimiter arrives.
  */
-export function stabilizeStreamingMarkdown(markdown: string): string {
-	const unstableStart = findUnstableMarkdownTailStart(markdown);
-	return unstableStart === undefined ? markdown : markdown.slice(0, unstableStart);
+export function stabilizeStreamingLinkText(text: string): string {
+	const unstableStart = findUnstableLinkTextStart(text);
+	return unstableStart === undefined ? text : text.slice(0, unstableStart);
 }
 
-function stabilizeStreamingMessage(message: AssistantMessage): AssistantMessage {
+function stabilizeStreamingInlineTokens(tokens: MarkdownToken[]): MarkdownToken[] {
 	let changed = false;
-	const content = message.content.map((part) => {
-		if (part.type === "text") {
-			const text = stabilizeStreamingMarkdown(part.text);
-			if (text !== part.text) {
+	const lastIndex = tokens.length - 1;
+	const stabilized = tokens.map((token, index) => {
+		if (token.type === "link") {
+			changed = true;
+			return { ...token, type: "text" };
+		}
+
+		if (
+			index === lastIndex
+			&& token.type === "text"
+			&& !token.tokens?.length
+			&& typeof token.text === "string"
+		) {
+			const text = stabilizeStreamingLinkText(token.text);
+			if (text !== token.text) {
 				changed = true;
-				return { ...part, text };
-			}
-		} else if (part.type === "thinking") {
-			const thinking = stabilizeStreamingMarkdown(part.thinking);
-			if (thinking !== part.thinking) {
-				changed = true;
-				return { ...part, thinking };
+				return { ...token, text };
 			}
 		}
-		return part;
-	});
-	return changed ? { ...message, content } : message;
-}
 
-function deferLinkFormatting(tokens: MarkdownToken[]): MarkdownToken[] {
-	let changed = false;
-	const deferred = tokens.map((token) => {
-		if (token.type !== "link") return token;
-		changed = true;
-		return { ...token, type: "text" };
+		return token;
 	});
-	return changed ? deferred : tokens;
+	return changed ? stabilized : tokens;
 }
 
 function stripRenderedCodeFences(lines: string[]): string[] {
@@ -328,7 +247,7 @@ function patchRuntimeMarkdownPrototype(
 			styleContext?: unknown,
 		): string {
 			const renderedTokens = streamingAssistantMarkdown.has(this as object)
-				? deferLinkFormatting(tokens)
+				? stabilizeStreamingInlineTokens(tokens)
 				: tokens;
 			return previousRenderInlineTokens.call(this, renderedTokens, styleContext);
 		};
@@ -359,9 +278,9 @@ function markAssistantMarkdown(
 }
 
 /**
- * Make assistant Markdown stream like Claude Code: keep ambiguous trailing
- * links hidden until complete, defer link underline/OSC 8 decoration until the
- * message finalizes, and omit literal fenced-code delimiter lines.
+ * Make assistant Markdown stream like Claude Code: keep incomplete link source
+ * hidden, defer link underline/OSC 8 decoration until the message finalizes,
+ * and omit literal fenced-code delimiter lines.
  *
  * The patch is intentionally scoped to Markdown components created by
  * AssistantMessageComponent, so standalone/user/extension Markdown keeps Pi's
@@ -385,8 +304,7 @@ export function installClaudeStyleMarkdown(
 		isStreaming?: boolean,
 	): void {
 		const effectiveIsStreaming = isStreaming ?? this.isStreaming ?? false;
-		const renderedMessage = effectiveIsStreaming ? stabilizeStreamingMessage(message) : message;
-		previousUpdateContent.call(this, renderedMessage, effectiveIsStreaming);
+		previousUpdateContent.call(this, message, effectiveIsStreaming);
 		try {
 			markAssistantMarkdown(
 				this,
