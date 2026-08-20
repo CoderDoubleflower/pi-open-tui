@@ -159,6 +159,8 @@ test("assistant prefixes preserve block grouping, markdown, exact color, and dyn
 			{ type: "text", text: "Second **bold** block" },
 		]);
 		const component = new AssistantMessageComponent(message, false, getMarkdownTheme(), "Thinking...", 1);
+		const originalChildren = [...(component as unknown as { contentContainer: { children: Component[] } })
+			.contentContainer.children];
 
 		const firstRender = component.render(48);
 		const firstRaw = firstRender.join("\n");
@@ -172,6 +174,11 @@ test("assistant prefixes preserve block grouping, markdown, exact color, and dyn
 		assert.ok(firstPlain.includes("two"));
 		assert.ok(firstPlain.includes("Second bold block"));
 		assert.ok(firstRender.every((line) => visibleWidth(line) <= 48));
+		assert.deepEqual(
+			(component as unknown as { contentContainer: { children: Component[] } }).contentContainer.children,
+			originalChildren,
+			"render-time prefix wrappers must not replace Markdown children",
+		);
 
 		currentTheme = prefixTheme(65, 43, 21);
 		const themedRaw = component.render(48).join("\n");
@@ -345,14 +352,14 @@ test("shared blink controller uses one timer, one phase, and one render per TUI"
 test("full cleanup restores both prototypes and stops an active blink timer", () => {
 	const assistantPrototype = AssistantMessageComponent.prototype;
 	const toolPrototype = ToolExecutionComponent.prototype;
-	const originalUpdateContent = assistantPrototype.updateContent;
+	const originalAssistantRender = assistantPrototype.render;
 	const originalRender = toolPrototype.render;
 	const scheduler = new FakeScheduler();
 	const blink = new ToolBlinkController(scheduler);
 	const cleanup = installOutputPrefixes(() => prefixTheme(1, 2, 3), { blink });
 
 	try {
-		assert.notEqual(assistantPrototype.updateContent, originalUpdateContent);
+		assert.notEqual(assistantPrototype.render, originalAssistantRender);
 		assert.notEqual(toolPrototype.render, originalRender);
 		const tool = customTool({ requestRender() {} } as unknown as TUI);
 		tool.markExecutionStarted();
@@ -360,7 +367,7 @@ test("full cleanup restores both prototypes and stops an active blink timer", ()
 		assert.equal(blink.runningCount(), 1);
 
 		cleanup();
-		assert.equal(assistantPrototype.updateContent, originalUpdateContent);
+		assert.equal(assistantPrototype.render, originalAssistantRender);
 		assert.equal(toolPrototype.render, originalRender);
 		assert.equal(blink.runningCount(), 0);
 		assert.equal(scheduler.cleared.length, 1);
@@ -368,14 +375,16 @@ test("full cleanup restores both prototypes and stops an active blink timer", ()
 		assert.equal(scheduler.cleared.length, 1);
 	} finally {
 		cleanup();
-		assistantPrototype.updateContent = originalUpdateContent;
+		assistantPrototype.render = originalAssistantRender;
 		toolPrototype.render = originalRender;
 	}
 });
 
 test("cleanup does not overwrite prototype wrappers installed later", () => {
 	const assistantPrototype = {
-		updateContent(_message: AssistantMessage, _isStreaming?: boolean) {},
+		render(_width: number): string[] {
+			return ["original"];
+		},
 	};
 	const toolPrototype = {
 		render(_width: number): string[] {
@@ -388,15 +397,15 @@ test("cleanup does not overwrite prototype wrappers installed later", () => {
 	);
 	const blink = new ToolBlinkController(new FakeScheduler());
 	const cleanupTool = installToolPrefixes(blink, toolPrototype);
-	const laterAssistantWrapper = () => {};
+	const laterAssistantWrapper = () => ["later"];
 	const laterToolWrapper = () => ["later"];
-	assistantPrototype.updateContent = laterAssistantWrapper;
+	assistantPrototype.render = laterAssistantWrapper;
 	toolPrototype.render = laterToolWrapper;
 
 	cleanupAssistant();
 	cleanupTool();
 	blink.dispose();
 
-	assert.equal(assistantPrototype.updateContent, laterAssistantWrapper);
+	assert.equal(assistantPrototype.render, laterAssistantWrapper);
 	assert.equal(toolPrototype.render, laterToolWrapper);
 });

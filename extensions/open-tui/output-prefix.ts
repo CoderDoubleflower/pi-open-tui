@@ -30,6 +30,7 @@ interface MutableContainer extends Component {
 interface AssistantInternals {
 	contentContainer?: unknown;
 	hideThinkingBlock?: unknown;
+	lastMessage?: unknown;
 }
 
 interface RenderRequester {
@@ -50,7 +51,7 @@ interface ToolInternals {
 }
 
 export interface AssistantPrototype {
-	updateContent(message: AssistantMessage, isStreaming?: boolean): void;
+	render(width: number): string[];
 }
 
 export interface ToolPrototype {
@@ -265,18 +266,21 @@ function thinkingPrefix(getTheme: () => Theme): string {
 	return currentTheme.italic(currentTheme.fg("thinkingText", THINKING_MARK));
 }
 
-function decorateAssistant(
+function renderAssistantWithPrefixes(
 	component: AssistantInternals,
 	message: AssistantMessage,
 	getTheme: () => Theme,
-): void {
-	if (!isMutableContainer(component.contentContainer)) return;
-	if (typeof component.hideThinkingBlock !== "boolean") return;
+	width: number,
+	renderOriginal: (width: number) => string[],
+): string[] {
+	if (!isMutableContainer(component.contentContainer)) return renderOriginal(width);
+	if (typeof component.hideThinkingBlock !== "boolean") return renderOriginal(width);
 
 	const kinds = assistantBlockKinds(message, component.hideThinkingBlock);
 	const markdownChildren = component.contentContainer.children.filter(isMarkdownComponent);
-	if (markdownChildren.length !== kinds.length) return;
+	if (markdownChildren.length !== kinds.length) return renderOriginal(width);
 
+	const originalChildren = component.contentContainer.children;
 	let markdownIndex = 0;
 	component.contentContainer.children = component.contentContainer.children.map((child) => {
 		if (!isMarkdownComponent(child)) return child;
@@ -286,6 +290,12 @@ function decorateAssistant(
 		}
 		return new PrefixComponent(child, () => rgb(255, 255, 255, ASSISTANT_DOT));
 	});
+
+	try {
+		return renderOriginal(width);
+	} finally {
+		component.contentContainer.children = originalChildren;
+	}
 }
 
 export function parseToolExecutionStatus(value: unknown): ToolExecutionStatus | undefined {
@@ -395,24 +405,30 @@ export function installAssistantPrefixes(
 	getTheme: () => Theme,
 	prototype: AssistantPrototype = AssistantMessageComponent.prototype,
 ): () => void {
-	const previousUpdateContent = prototype.updateContent;
-	const prefixedUpdateContent = function (
-		this: AssistantInternals,
-		message: AssistantMessage,
-		isStreaming?: boolean,
-	): void {
-		previousUpdateContent.call(this, message, isStreaming);
+	const previousRender = prototype.render;
+	const prefixedRender = function (this: AssistantInternals, width: number): string[] {
+		const renderOriginal = (renderWidth: number) => previousRender.call(this, renderWidth);
+		if (!this.lastMessage || typeof this.lastMessage !== "object") {
+			return renderOriginal(width);
+		}
 		try {
-			decorateAssistant(this, message, getTheme);
+			return renderAssistantWithPrefixes(
+				this,
+				this.lastMessage as AssistantMessage,
+				getTheme,
+				width,
+				renderOriginal,
+			);
 		} catch {
 			// Unknown future component internals keep pi's original rendering.
+			return renderOriginal(width);
 		}
 	};
 
-	prototype.updateContent = prefixedUpdateContent;
+	prototype.render = prefixedRender;
 	return () => {
-		if (prototype.updateContent === prefixedUpdateContent) {
-			prototype.updateContent = previousUpdateContent;
+		if (prototype.render === prefixedRender) {
+			prototype.render = previousRender;
 		}
 	};
 }
