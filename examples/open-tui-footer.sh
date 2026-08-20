@@ -196,5 +196,5 @@ fi
 printf '%b\n' "${BLUE}[${MODEL}]${RESET} | ${GREEN}📁 ${DIR_NAME}${RESET}${EFFORT_SEGMENT} | ${MAGENTA}Context: ${CURRENT_TOKENS_K}K${RESET}/${CYAN}${CONTEXT_SIZE_K}K${RESET}${CACHE_HIT_SEGMENT}"
 
 if [[ -n "$EXTENSION_STATUSES" ]]; then
-    printf '%b\n' "${CYAN}Extension status:${RESET} ${EXTENSION_STATUSES}"
+    printf '%b\n' "${CYAN}${EXTENSION_STATUSES}${RESET}"
 fi
