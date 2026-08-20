@@ -85,12 +85,23 @@ test("Claude tool-use labels match native Pi tools", () => {
 		name: "Read",
 		detail: "src/a.ts",
 	});
+	assert.deepEqual(
+		formatClaudeToolUse("read", { path: "/repo/src/a.ts", offset: 3, limit: 2 }, "/repo", true),
+		{
+			name: "Read",
+			detail: "src/a.ts · lines 3-4",
+		},
+	);
 	assert.deepEqual(formatClaudeToolUse("write", { path: "src/a.ts" }, "/repo"), {
 		name: "Write",
 		detail: "src/a.ts",
 	});
 	assert.deepEqual(formatClaudeToolUse("edit", { path: "src/a.ts" }, "/repo"), {
 		name: "Update",
+		detail: "src/a.ts",
+	});
+	assert.deepEqual(formatClaudeToolUse("edit", { path: "src/a.ts", oldText: "" }, "/repo"), {
+		name: "Create",
 		detail: "src/a.ts",
 	});
 	assert.deepEqual(formatClaudeToolUse("find", { pattern: "**/*.ts", path: "src" }, "/repo"), {
@@ -101,6 +112,18 @@ test("Claude tool-use labels match native Pi tools", () => {
 		name: "Grep",
 		detail: 'pattern: "TODO"',
 	});
+});
+
+test("Bash call summaries preserve Claude's multiline truncation rules", () => {
+	assert.equal(formatClaudeToolUse("bash", { command: "one\ntwo\nthree" }).detail, "one\ntwo…");
+	assert.equal(
+		formatClaudeToolUse("bash", { command: "one\ntwo\nthree" }, undefined, true).detail,
+		"one\ntwo\nthree",
+	);
+	assert.equal(
+		formatClaudeToolUse("bash", { command: "x".repeat(161) }).detail,
+		`${"x".repeat(160)}…`,
+	);
 });
 
 test("Claude result summaries follow Read/Write/Search semantics", () => {
@@ -131,7 +154,161 @@ test("Claude result summaries follow Read/Write/Search semantics", () => {
 			{ isError: false, content: [{ type: "text", text: "a.ts\nb.ts" }] },
 			"success",
 		),
-		["Found 2 files"],
+		["Found 2 files (ctrl+o to expand)"],
+	);
+});
+
+test("Bash queued, progress, and final result views stay distinct", () => {
+	assert.deepEqual(formatClaudeToolResult("bash", {}, undefined, "pending"), ["Waiting…"]);
+	assert.deepEqual(formatClaudeToolResult("bash", {}, { content: [] }, "running"), ["Running…"]);
+	assert.deepEqual(
+		formatClaudeToolResult(
+			"bash",
+			{},
+			{ content: [{ type: "text", text: "1\n2\n3\n4\n5\n6" }] },
+			"running",
+		),
+		["2", "3", "4", "5", "6", "+1 lines"],
+	);
+	assert.deepEqual(
+		formatClaudeToolResult(
+			"bash",
+			{},
+			{ content: [{ type: "text", text: "1\n2\n3\n4\n5" }] },
+			"success",
+		),
+		["1", "2", "3", "… +2 lines (ctrl+o to expand)"],
+	);
+	assert.deepEqual(
+		formatClaudeToolResult(
+			"bash",
+			{},
+			{ content: [{ type: "text", text: "(no output)" }] },
+			"success",
+		),
+		["(No output)"],
+	);
+});
+
+test("Read and Write cover Claude's edge-case messages", () => {
+	assert.deepEqual(
+		formatClaudeToolResult(
+			"read",
+			{},
+			{ content: [{ type: "text", text: "one\n" }] },
+			"success",
+		),
+		["Read 1 line"],
+	);
+	assert.deepEqual(
+		formatClaudeToolResult(
+			"read",
+			{},
+			{ content: [], details: { unchanged: true } },
+			"success",
+		),
+		["Unchanged since last read"],
+	);
+	assert.deepEqual(
+		formatClaudeToolResult(
+			"read",
+			{},
+			{ content: [{ type: "image", data: "YQ==", mimeType: "image/png" }] },
+			"success",
+		),
+		["Read image (1B)"],
+	);
+	assert.deepEqual(
+		formatClaudeToolResult("write", { path: "empty.txt", content: "" }, {}, "success"),
+		["Wrote 0 lines to empty.txt", "(No content)"],
+	);
+	const content = Array.from({ length: 12 }, (_, index) => String(index + 1)).join("\n");
+	const preview = formatClaudeToolResult("write", { path: "many.txt", content }, {}, "success");
+	assert.equal(preview.at(-1), "… +2 lines (ctrl+o to expand)");
+});
+
+test("Edit results include changed-line counts and the actual diff", () => {
+	assert.deepEqual(
+		formatClaudeToolResult(
+			"edit",
+			{},
+			{ content: [], details: { diff: "@@\n-old\n+new" } },
+			"success",
+		),
+		["Added 1 line, removed 1 line", "@@", "-old", "+new"],
+	);
+});
+
+test("Search results count matches, hide Pi notices, and expand to content", () => {
+	const grepResult = {
+		content: [{ type: "text", text: "a.ts:1: one\na.ts-2- context\nb.ts:3: two" }],
+	};
+	assert.deepEqual(formatClaudeToolResult("grep", {}, grepResult, "success"), [
+		"Found 2 lines (ctrl+o to expand)",
+	]);
+	assert.deepEqual(
+		formatClaudeToolResult("grep", {}, grepResult, "success", undefined, true),
+		["Found 2 lines", "a.ts:1: one", "a.ts-2- context", "b.ts:3: two"],
+	);
+	assert.deepEqual(
+		formatClaudeToolResult(
+			"find",
+			{},
+			{
+				content: [{ type: "text", text: "a.ts\nb.ts\n\n[2 results limit reached]" }],
+				details: { resultLimitReached: 2 },
+			},
+			"success",
+		),
+		["Found 2 files (ctrl+o to expand)"],
+	);
+	assert.deepEqual(
+		formatClaudeToolResult(
+			"find",
+			{},
+			{ content: [{ type: "text", text: "No files found matching pattern" }] },
+			"success",
+		),
+		["Found 0 files"],
+	);
+	assert.deepEqual(
+		formatClaudeToolResult(
+			"ls",
+			{},
+			{ content: [{ type: "text", text: "(empty directory)" }] },
+			"success",
+		),
+		["Found 0 entries"],
+	);
+});
+
+test("collapsed tool errors use Claude's concise per-tool labels", () => {
+	assert.deepEqual(
+		formatClaudeToolResult(
+			"read",
+			{},
+			{ content: [{ type: "text", text: "ENOENT: no such file" }] },
+			"error",
+		),
+		["File not found"],
+	);
+	assert.deepEqual(
+		formatClaudeToolResult(
+			"edit",
+			{},
+			{ content: [{ type: "text", text: "old text did not match" }] },
+			"error",
+		),
+		["Error editing file"],
+	);
+	assert.deepEqual(
+		formatClaudeToolResult(
+			"grep",
+			{},
+			{ content: [{ type: "text", text: "bad regex" }] },
+			"error",
+		),
+		["Error searching files"],
 	);
 });
 
