@@ -208,7 +208,9 @@ function renderClaudeTool(
 	const body = resultLines.length === 0
 		? first
 		: [first, `${responsePrefix()}${resultLines[0]}`, ...resultLines.slice(1).map((line) => `     ${line}`)].join("\n");
-	return new Text(body, 0, 0).render(width);
+	// ToolExecutionComponent normally renders a leading Spacer(1). Replacing
+	// its render method bypasses that child, so restore Claude's top margin here.
+	return ["", ...new Text(body, 0, 0).render(width)];
 }
 
 export function installClaudeToolRenderer(
