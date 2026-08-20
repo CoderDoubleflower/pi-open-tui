@@ -150,7 +150,7 @@ test("tool status uses Claude unresolved/success/error state model", () => {
 
 test("native tools use Claude chrome while extension tools keep their renderer", () => {
 	const prototype = {
-		render(): string[] {
+		render(_width: number): string[] {
 			return ["ORIGINAL"];
 		},
 	};
@@ -166,12 +166,12 @@ test("native tools use Claude chrome while extension tools keep their renderer",
 			result: { isError: false, content: [{ type: "text", text: "one\ntwo" }] },
 			ui: { requestRender() {} },
 		};
-		const nativeLines = prototype.render.call(native).map(stripAnsi);
+		const nativeLines = prototype.render.call(native, 80).map(stripAnsi);
 		assert.ok(nativeLines.some((line) => line.includes("● Read(src/a.ts)")));
 		assert.ok(nativeLines.some((line) => line.includes("⎿  Read 2 lines")));
 
 		const custom = { ...native, toolName: "my_extension_tool" };
-		assert.deepEqual(prototype.render.call(custom), ["ORIGINAL"]);
+		assert.deepEqual(prototype.render.call(custom, 80), ["ORIGINAL"]);
 	} finally {
 		cleanup();
 	}
