@@ -48,7 +48,16 @@ fi
 # USAGE_CACHE_READ=$(jq -r '.usage.cacheRead // 0' <<<"$input")
 # USAGE_CACHE_WRITE=$(jq -r '.usage.cacheWrite // 0' <<<"$input")
 # USAGE_COST=$(jq -r '.usage.cost // 0' <<<"$input")
-# USAGE_LATEST_CACHE_HIT_RATE=$(jq -r '.usage.latestCacheHitRate // 0' <<<"$input")
+# USAGE_LATEST_CACHE_HIT_RATE=$(jq -r '.usage.latestCacheHitRate // empty' <<<"$input")
+# Session weighted cache hit rate =
+#   cumulative cacheRead / (cumulative input + cacheRead + cacheWrite) * 100
+# USAGE_SESSION_CACHE_HIT_RATE=$(jq -r '
+#   ((.usage.input // 0) + (.usage.cacheRead // 0) + (.usage.cacheWrite // 0)) as $promptTokens
+#   | if $promptTokens > 0
+#     then ((.usage.cacheRead // 0) * 100 / $promptTokens)
+#     else empty
+#     end
+# ' <<<"$input")
 
 # Git branch, working tree, remote state, and detached commit
 # GIT_BRANCH=$(jq -r '.git.branch // empty' <<<"$input")
@@ -103,6 +112,13 @@ mapfile -t fields < <(
         (((.context.tokens // 0) / 1000) | round | tostring),
         (((.context.contextWindow // .model.contextWindow // 0) / 1000) | round | tostring),
         (if .usage.latestCacheHitRate == null then "" else (.usage.latestCacheHitRate | tostring) end),
+        (
+            ((.usage.input // 0) + (.usage.cacheRead // 0) + (.usage.cacheWrite // 0)) as $promptTokens
+            | if $promptTokens > 0
+              then (((.usage.cacheRead // 0) * 100 / $promptTokens) | tostring)
+              else ""
+              end
+        ),
         ((.extensionStatuses // {}) | to_entries | map(.value) | join(" | "))
     ] | .[]' <<<"$input"
 )
@@ -112,8 +128,9 @@ DIR=${fields[1]:-}
 EFFORT=${fields[2]:-}
 CURRENT_TOKENS_K=${fields[3]:-0}
 CONTEXT_SIZE_K=${fields[4]:-0}
-CACHE_HIT_RATE=${fields[5]:-}
-EXTENSION_STATUSES=${fields[6]:-}
+LATEST_CACHE_HIT_RATE=${fields[5]:-}
+SESSION_CACHE_HIT_RATE=${fields[6]:-}
+EXTENSION_STATUSES=${fields[7]:-}
 
 trimmed_dir=${DIR%/}
 DIR_NAME=${trimmed_dir##*/}
@@ -126,9 +143,14 @@ if [[ -n "$EFFORT" ]]; then
     EFFORT_SEGMENT=" | ${YELLOW}Effort: ${EFFORT}${RESET}"
 fi
 
-CACHE_HIT_SEGMENT=""
-if [[ "$CACHE_HIT_RATE" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
-    printf -v CACHE_HIT_SEGMENT ' | %bCache hit: %.1f%%%b' "$YELLOW" "$CACHE_HIT_RATE" "$RESET"
+LATEST_CACHE_HIT_SEGMENT=""
+if [[ "$LATEST_CACHE_HIT_RATE" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+    printf -v LATEST_CACHE_HIT_SEGMENT ' | %bLatest hit: %.1f%%%b' "$YELLOW" "$LATEST_CACHE_HIT_RATE" "$RESET"
+fi
+
+SESSION_CACHE_HIT_SEGMENT=""
+if [[ "$SESSION_CACHE_HIT_RATE" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+    printf -v SESSION_CACHE_HIT_SEGMENT ' | %bSession hit: %.1f%%%b' "$CYAN" "$SESSION_CACHE_HIT_RATE" "$RESET"
 fi
 
 # -----------------------------------------------------------------------------
@@ -193,7 +215,7 @@ fi
 # Example final composition with optional segments:
 # printf '%b\n' "${BLUE}[${MODEL}]${RESET} | ${GREEN}📁 ${DIR_NAME}${RESET}${EFFORT_SEGMENT}${PROVIDER_SEGMENT}${SESSION_SEGMENT}${GIT_SEGMENT}${RUNTIME_SEGMENT}${USAGE_SEGMENT}${COST_SEGMENT}${TIMER_SEGMENT}${EXTENSIONS_SEGMENT}"
 
-printf '%b\n' "${BLUE}[${MODEL}]${RESET} | ${GREEN}📁 ${DIR_NAME}${RESET}${EFFORT_SEGMENT} | ${MAGENTA}Context: ${CURRENT_TOKENS_K}K${RESET}/${CYAN}${CONTEXT_SIZE_K}K${RESET}${CACHE_HIT_SEGMENT}"
+printf '%b\n' "${BLUE}[${MODEL}]${RESET} | ${GREEN}📁 ${DIR_NAME}${RESET}${EFFORT_SEGMENT} | ${MAGENTA}Context: ${CURRENT_TOKENS_K}K${RESET}/${CYAN}${CONTEXT_SIZE_K}K${RESET}${LATEST_CACHE_HIT_SEGMENT}${SESSION_CACHE_HIT_SEGMENT}"
 
 if [[ -n "$EXTENSION_STATUSES" ]]; then
     printf '%b\n' "${CYAN}${EXTENSION_STATUSES}${RESET}"
