@@ -174,7 +174,7 @@ Indexing workspace… (repository · ...)
 /compact
 ```
 
-压缩期间必须显示 Pi 原生 compaction 动画和取消提示。Spinner 不应覆盖它。retry 和 branch summary 同样由 Pi core 管理。
+压缩期间必须由自定义 Spinner 显示 `Compacting conversation…`，不应出现 Pi 原生 `Auto-compacting...` 行。retry 和 branch summary 也映射到自定义 Widget；若当前 Pi 版本的内部状态容器无法识别，则允许 fail-open 回退到原生状态行。
 
 ## 12. Cleanup
 

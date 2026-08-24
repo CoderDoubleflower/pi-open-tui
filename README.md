@@ -140,7 +140,7 @@ Pi Custom Widget
   - 宽度裁剪
 ```
 
-普通 Agent 工作 Spinner 被 Widget 替代，但 Pi 自己的 retry、compaction 和 branch-summary 状态仍由 Pi Core 的独立 Status Indicator 显示，不会被一起隐藏。
+普通 Agent 工作 Spinner 被 Widget 替代。启用 Spinner 时，Pi 的 retry、compaction 和 branch-summary Status Indicator 也会映射到同一个 Widget：自动/手动压缩显示 `Compacting conversation…`，不会再出现 Pi 原生的 `Auto-compacting...` 行。若 Pi 的内部组件结构无法识别，桥接会 fail-open，保留原生状态行以免丢失运行状态。
 
 每次 Agent run 会固定抽取一个动词，请求、Thinking、回复、流式工具参数和工具执行阶段都沿用这个动词。内置动词表目前包含 187 个词。
 

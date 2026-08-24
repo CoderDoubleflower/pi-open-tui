@@ -2,6 +2,10 @@ import type { Theme, ThemeColor } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth } from "@earendil-works/pi-tui";
 import type { Component, TUI } from "@earendil-works/pi-tui";
 import {
+	installNativeStatusBridge,
+	type NativeStatusSink,
+} from "./native-status-bridge.ts";
+import {
 	buildPingPongFrames,
 	SPINNER_GLYPHS,
 	type SpinnerPlatform,
@@ -12,6 +16,7 @@ import { formatDuration } from "./utils.ts";
 export const SPINNER_WIDGET_KEY = "open-tui-spinner";
 export const SPINNER_WIDGET_INTERVAL_MS = 120;
 const CLAUDE_GLIMMER_INTERVAL_MS = 50;
+const MAX_NATIVE_STATUS_BRIDGE_ATTEMPTS = 8;
 
 // Claude Code's dark-theme system-spinner palette. Compaction switches to the
 // system spinner before compact_start, and compact_start only changes message.
@@ -33,7 +38,7 @@ export interface SpinnerWidgetSnapshot {
 	stalledIntensity: number;
 }
 
-export interface SpinnerWidgetSource {
+export interface SpinnerWidgetSource extends NativeStatusSink {
 	getWidgetSnapshot(): SpinnerWidgetSnapshot;
 	setRequestRender(requestRender: (() => void) | undefined): void;
 }
@@ -88,6 +93,8 @@ export function createSpinnerWidget(
 	const frames = buildPingPongFrames(SPINNER_GLYPHS[platform]);
 	let frameIndex = 0;
 	let disposed = false;
+	let bridgeAttempts = 0;
+	let cleanupNativeStatusBridge: (() => void) | undefined;
 
 	const requestRender = () => {
 		if (!disposed) tui.requestRender();
@@ -117,11 +124,17 @@ export function createSpinnerWidget(
 			disposed = true;
 			clearInterval(animationTimer);
 			clearInterval(glimmerTimer);
+			cleanupNativeStatusBridge?.();
+			cleanupNativeStatusBridge = undefined;
 			source.setRequestRender(undefined);
 		},
 		invalidate() {},
 		render(width: number): string[] {
 			if (disposed || width <= 0) return [];
+			if (!cleanupNativeStatusBridge && bridgeAttempts < MAX_NATIVE_STATUS_BRIDGE_ATTEMPTS) {
+				bridgeAttempts++;
+				cleanupNativeStatusBridge = installNativeStatusBridge(tui, component, source);
+			}
 
 			const snapshot = source.getWidgetSnapshot();
 			if (snapshot.phase === "hidden") return [];
