@@ -1,0 +1,146 @@
+name: Upgrade Pi 0.84.3
+
+on:
+  push:
+    branches:
+      - chore/pi-0.84.3
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  upgrade:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chore/pi-0.84.3
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: npm
+
+      - name: Apply Pi 0.84.3 compatibility changes
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+
+          const path = "package.json";
+          const pkg = JSON.parse(fs.readFileSync(path, "utf8"));
+          pkg.peerDependencies["@earendil-works/pi-coding-agent"] = ">=0.84.3 <0.85.0";
+          pkg.peerDependencies["@earendil-works/pi-ai"] = ">=0.84.3 <0.85.0";
+          pkg.peerDependencies["@earendil-works/pi-tui"] = ">=0.84.3 <0.85.0";
+          pkg.devDependencies["@earendil-works/pi-coding-agent"] = "0.84.3";
+          pkg.devDependencies["@earendil-works/pi-ai"] = "0.84.3";
+          pkg.devDependencies["@earendil-works/pi-tui"] = "0.84.3";
+          const lifecycleTest = "tests/compaction-lifecycle.test.ts";
+          if (!pkg.scripts.test.includes(lifecycleTest)) {
+            pkg.scripts.test = `${pkg.scripts.test} ${lifecycleTest}`;
+          }
+          fs.writeFileSync(path, `${JSON.stringify(pkg, null, 2)}\n`);
+          NODE
+
+          cat > extensions/open-tui/compaction-lifecycle.ts <<'EOF'
+          export interface CompactionWorkingState {
+          	workingSince: number | undefined;
+          	lastDoneIn: number | undefined;
+          }
+
+          /**
+           * Settle the visible working duration after a terminal compaction failure.
+           * Overflow recovery keeps the state intact until the retrying agent starts.
+           */
+          export function settleCompactionFailure(
+          	state: CompactionWorkingState,
+          	willRetry: boolean,
+          	nowMs = Date.now(),
+          ): boolean {
+          	if (willRetry || state.workingSince === undefined) return false;
+          	state.lastDoneIn = Math.max(0, nowMs - state.workingSince);
+          	state.workingSince = undefined;
+          	return true;
+          }
+          EOF
+
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path("extensions/open-tui/index.ts")
+          source = path.read_text()
+
+          import_anchor = 'import { registerClearCommand } from "./clear-command.ts";\n'
+          import_line = 'import { settleCompactionFailure } from "./compaction-lifecycle.ts";\n'
+          if import_line not in source:
+              if import_anchor not in source:
+                  raise SystemExit("Could not locate clear-command import anchor")
+              source = source.replace(import_anchor, import_anchor + import_line, 1)
+
+          listener_anchor = '\tpi.on("session_compact", (_event, ctx) => {\n'
+          if 'pi.on("session_compact_failed"' not in source:
+              if listener_anchor not in source:
+                  raise SystemExit("Could not locate session_compact listener anchor")
+              listener = '''\tpi.on("session_compact_failed", (event, ctx) => {
+          \t\tif (!sessionLifecycle.isCurrent()) return;
+          \t\tstopWorkingTimer();
+          \t\tsettleCompactionFailure(state, event.willRetry);
+          \t\tinvalidateUsageCache();
+          \t\trefreshInteractiveState(ctx);
+          \t});
+
+          '''
+              source = source.replace(listener_anchor, listener + listener_anchor, 1)
+
+          path.write_text(source)
+          PY
+
+          cat > tests/compaction-lifecycle.test.ts <<'EOF'
+          import assert from "node:assert/strict";
+          import test from "node:test";
+          import { settleCompactionFailure } from "../extensions/open-tui/compaction-lifecycle.ts";
+
+          test("terminal compaction failure settles an active working duration", () => {
+          	const state = { workingSince: 1_000, lastDoneIn: undefined as number | undefined };
+          	assert.equal(settleCompactionFailure(state, false, 4_500), true);
+          	assert.equal(state.workingSince, undefined);
+          	assert.equal(state.lastDoneIn, 3_500);
+          });
+
+          test("overflow recovery preserves working state for the retry", () => {
+          	const state = { workingSince: 1_000, lastDoneIn: undefined as number | undefined };
+          	assert.equal(settleCompactionFailure(state, true, 4_500), false);
+          	assert.equal(state.workingSince, 1_000);
+          	assert.equal(state.lastDoneIn, undefined);
+          });
+
+          test("idle compaction failure does not synthesize a completion duration", () => {
+          	const state = { workingSince: undefined, lastDoneIn: 800 };
+          	assert.equal(settleCompactionFailure(state, false, 4_500), false);
+          	assert.equal(state.workingSince, undefined);
+          	assert.equal(state.lastDoneIn, 800);
+          });
+          EOF
+
+      - name: Install dependencies and refresh lockfile
+        run: npm install
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Commit validated upgrade
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json extensions/open-tui/index.ts extensions/open-tui/compaction-lifecycle.ts tests/compaction-lifecycle.test.ts
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "chore: upgrade Pi compatibility to 0.84.3"
+          git push origin HEAD:chore/pi-0.84.3
