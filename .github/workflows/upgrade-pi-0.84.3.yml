@@ -72,15 +72,47 @@ jobs:
           python3 <<'PY'
           from pathlib import Path
 
-          path = Path("extensions/open-tui/index.ts")
-          source = path.read_text()
+          clear_path = Path("extensions/open-tui/clear-command.ts")
+          clear_source = clear_path.read_text()
+          clear_source = clear_source.replace(
+              'import { registerTodoIntegration } from "./todo.ts";\n',
+              '',
+              1,
+          )
+          clear_source = clear_source.replace(
+              '\tregisterTodoIntegration(pi);\n\n',
+              '',
+              1,
+          )
+          clear_path.write_text(clear_source)
+
+          index_path = Path("extensions/open-tui/index.ts")
+          source = index_path.read_text()
 
           import_anchor = 'import { registerClearCommand } from "./clear-command.ts";\n'
-          import_line = 'import { settleCompactionFailure } from "./compaction-lifecycle.ts";\n'
-          if import_line not in source:
+          compaction_import = 'import { settleCompactionFailure } from "./compaction-lifecycle.ts";\n'
+          if compaction_import not in source:
               if import_anchor not in source:
                   raise SystemExit("Could not locate clear-command import anchor")
-              source = source.replace(import_anchor, import_anchor + import_line, 1)
+              source = source.replace(import_anchor, import_anchor + compaction_import, 1)
+
+          todo_import_anchor = 'import { formatTurnTelemetry, TurnTelemetryTracker } from "./telemetry.ts";\n'
+          todo_import = 'import { registerTodoIntegration } from "./todo.ts";\n'
+          if todo_import not in source:
+              if todo_import_anchor not in source:
+                  raise SystemExit("Could not locate telemetry import anchor")
+              source = source.replace(todo_import_anchor, todo_import_anchor + todo_import, 1)
+
+          registration_anchor = '\tregisterClearCommand(pi);\n'
+          todo_registration = '\tregisterTodoIntegration(pi);\n'
+          if todo_registration not in source:
+              if registration_anchor not in source:
+                  raise SystemExit("Could not locate clear registration anchor")
+              source = source.replace(
+                  registration_anchor,
+                  registration_anchor + todo_registration,
+                  1,
+              )
 
           listener_anchor = '\tpi.on("session_compact", (_event, ctx) => {\n'
           if 'pi.on("session_compact_failed"' not in source:
@@ -97,7 +129,124 @@ jobs:
           '''
               source = source.replace(listener_anchor, listener + listener_anchor, 1)
 
-          path.write_text(source)
+          index_path.write_text(source)
+
+          output_path = Path("tests/output-prefix.test.ts")
+          output_source = output_path.read_text()
+          output_source = output_source.replace(
+              '''class LiteralComponent implements Component {
+          \tconstructor(private readonly lines: string[]) {}
+          \trender(): string[] {
+          \t\treturn this.lines;
+          \t}
+          \tinvalidate(): void {}
+          }
+
+          class Markdown implements Component {
+          \tconstructor(private text: string) {}
+          \tsetText(text: string): void {
+          \t\tthis.text = text;
+          \t}
+          \trender(): string[] {
+          \t\treturn [this.text];
+          \t}
+          \tinvalidate(): void {}
+          }
+
+          class FakeContainer implements Component {
+          \tconstructor(public children: Component[]) {}
+          \trender(width: number): string[] {
+          \t\treturn this.children.flatMap((child) => child.render(width));
+          \t}
+          \tinvalidate(): void {}
+          }
+          ''',
+              '''class LiteralComponent implements Component {
+          \tprivate readonly lines: string[];
+
+          \tconstructor(lines: string[]) {
+          \t\tthis.lines = lines;
+          \t}
+
+          \trender(): string[] {
+          \t\treturn this.lines;
+          \t}
+          \tinvalidate(): void {}
+          }
+
+          class Markdown implements Component {
+          \tprivate text: string;
+
+          \tconstructor(text: string) {
+          \t\tthis.text = text;
+          \t}
+
+          \tsetText(text: string): void {
+          \t\tthis.text = text;
+          \t}
+          \trender(): string[] {
+          \t\treturn [this.text];
+          \t}
+          \tinvalidate(): void {}
+          }
+
+          class FakeContainer implements Component {
+          \tchildren: Component[];
+
+          \tconstructor(children: Component[]) {
+          \t\tthis.children = children;
+          \t}
+
+          \trender(width: number): string[] {
+          \t\treturn this.children.flatMap((child) => child.render(width));
+          \t}
+          \tinvalidate(): void {}
+          }
+          ''',
+              1,
+          )
+          output_path.write_text(output_source)
+
+          telemetry_path = Path("tests/telemetry.test.ts")
+          telemetry_source = telemetry_path.read_text()
+          telemetry_anchor = '\t\tregisterCommand() {},\n\t\tgetThinkingLevel: () => "off",\n'
+          telemetry_replacement = '''\t\tregisterCommand() {},
+          \t\tregisterTool() {},
+          \t\tevents: {
+          \t\t\temit() {},
+          \t\t\ton() {
+          \t\t\t\treturn () => {};
+          \t\t\t},
+          \t\t},
+          \t\tgetThinkingLevel: () => "off",
+          '''
+          if telemetry_anchor not in telemetry_source:
+              raise SystemExit("Could not locate telemetry Pi mock anchor")
+          telemetry_source = telemetry_source.replace(
+              telemetry_anchor,
+              telemetry_replacement,
+              1,
+          )
+          telemetry_path.write_text(telemetry_source)
+
+          todo_test_path = Path("tests/todo-spinner-integration.test.ts")
+          todo_test_source = todo_test_path.read_text()
+          completion_import_anchor = 'import { DEFAULT_CONFIG } from "../extensions/open-tui/config.ts";\n'
+          completion_import = 'import { TURN_COMPLETION_VERBS } from "../extensions/open-tui/spinner-completion-verbs.ts";\n'
+          if completion_import not in todo_test_source:
+              if completion_import_anchor not in todo_test_source:
+                  raise SystemExit("Could not locate Todo completion import anchor")
+              todo_test_source = todo_test_source.replace(
+                  completion_import_anchor,
+                  completion_import_anchor + completion_import,
+                  1,
+              )
+          todo_test_source = todo_test_source.replace(
+              'assert.match(idleLines[0] ?? "", /✻ Worked for 12s/);',
+              'assert.match(idleLines[0] ?? "", new RegExp(`✻ ${TURN_COMPLETION_VERBS[0]} for 12s`));',
+              1,
+          )
+          todo_test_path.write_text(todo_test_source)
           PY
 
           cat > tests/compaction-lifecycle.test.ts <<'EOF'
@@ -141,7 +290,14 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add package.json package-lock.json extensions/open-tui/index.ts extensions/open-tui/compaction-lifecycle.ts tests/compaction-lifecycle.test.ts
+          git add package.json package-lock.json \
+            extensions/open-tui/clear-command.ts \
+            extensions/open-tui/compaction-lifecycle.ts \
+            extensions/open-tui/index.ts \
+            tests/compaction-lifecycle.test.ts \
+            tests/output-prefix.test.ts \
+            tests/telemetry.test.ts \
+            tests/todo-spinner-integration.test.ts
           if git diff --cached --quiet; then
             exit 0
           fi
