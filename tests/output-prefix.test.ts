@@ -21,7 +21,12 @@ const theme = {
 } as unknown as Theme;
 
 class LiteralComponent implements Component {
-	constructor(private readonly lines: string[]) {}
+	private readonly lines: string[];
+
+	constructor(lines: string[]) {
+		this.lines = lines;
+	}
+
 	render(): string[] {
 		return this.lines;
 	}
@@ -29,7 +34,12 @@ class LiteralComponent implements Component {
 }
 
 class Markdown implements Component {
-	constructor(private text: string) {}
+	private text: string;
+
+	constructor(text: string) {
+		this.text = text;
+	}
+
 	setText(text: string): void {
 		this.text = text;
 	}
@@ -40,7 +50,12 @@ class Markdown implements Component {
 }
 
 class FakeContainer implements Component {
-	constructor(public children: Component[]) {}
+	children: Component[];
+
+	constructor(children: Component[]) {
+		this.children = children;
+	}
+
 	render(width: number): string[] {
 		return this.children.flatMap((child) => child.render(width));
 	}

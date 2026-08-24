@@ -26,7 +26,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node --test tests/clear-command.test.ts tests/settings-command.test.ts tests/fullscreen-scroll.test.ts tests/footer.test.ts tests/footer-script.test.ts tests/editor.test.ts tests/user-message.test.ts tests/output-prefix.test.ts tests/claude-tool-spacing.test.ts tests/markdown.test.ts tests/telemetry.test.ts tests/theme.test.ts tests/spinner-config.test.ts tests/spinner-content.test.ts tests/spinner-events.test.ts tests/spinner-suffix.test.ts tests/spinner-state.test.ts tests/spinner-render.test.ts tests/spinner-lifecycle.test.ts tests/native-status-bridge.test.ts tests/spinner-native-performance.test.ts tests/spinner-idle.test.ts tests/todo-spinner-integration.test.ts",
+    "test": "node --test tests/clear-command.test.ts tests/settings-command.test.ts tests/fullscreen-scroll.test.ts tests/footer.test.ts tests/footer-script.test.ts tests/editor.test.ts tests/user-message.test.ts tests/output-prefix.test.ts tests/claude-tool-spacing.test.ts tests/markdown.test.ts tests/telemetry.test.ts tests/theme.test.ts tests/spinner-config.test.ts tests/spinner-content.test.ts tests/spinner-events.test.ts tests/spinner-suffix.test.ts tests/spinner-state.test.ts tests/spinner-render.test.ts tests/spinner-lifecycle.test.ts tests/native-status-bridge.test.ts tests/spinner-native-performance.test.ts tests/spinner-idle.test.ts tests/todo-spinner-integration.test.ts tests/compaction-lifecycle.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "pi": {
@@ -39,9 +39,9 @@
     "image": "https://raw.githubusercontent.com/OldSuns/pi-open-tui/main/assets/preview_dashboard_1.png"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": ">=0.80",
-    "@earendil-works/pi-ai": ">=0.80",
-    "@earendil-works/pi-tui": ">=0.80"
+    "@earendil-works/pi-coding-agent": ">=0.84.3 <0.85.0",
+    "@earendil-works/pi-ai": ">=0.84.3 <0.85.0",
+    "@earendil-works/pi-tui": ">=0.84.3 <0.85.0"
   },
   "peerDependenciesMeta": {
     "@earendil-works/pi-coding-agent": {
@@ -55,9 +55,9 @@
     }
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "*",
-    "@earendil-works/pi-ai": "*",
-    "@earendil-works/pi-tui": "*",
+    "@earendil-works/pi-coding-agent": "0.84.3",
+    "@earendil-works/pi-ai": "0.84.3",
+    "@earendil-works/pi-tui": "0.84.3",
     "@types/node": "^22.0.0",
     "typescript": "^5.5.0"
   },
