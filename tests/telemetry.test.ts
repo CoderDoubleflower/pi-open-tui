@@ -367,6 +367,13 @@ test("open-tui notifies once after a complete agent run", () => {
 			handlers.set(event, [...(handlers.get(event) ?? []), handler]);
 		},
 		registerCommand() {},
+		registerTool() {},
+		events: {
+			emit() {},
+			on() {
+				return () => {};
+			},
+		},
 		getThinkingLevel: () => "off",
 	} as unknown as ExtensionAPI;
 	const ctx = {

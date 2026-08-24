@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { registerClearCommand } from "./clear-command.ts";
+import { settleCompactionFailure } from "./compaction-lifecycle.ts";
 import { type OpenTuiConfig, DEFAULT_CONFIG, ensureConfigExists, loadConfig, saveConfig } from "./config.ts";
 import { installEditor } from "./editor.ts";
 import { installFooter } from "./footer.ts";
@@ -17,6 +18,7 @@ import {
 } from "./spinner.ts";
 import { TOKEN_COUNTER_FRAME_MS } from "./spinner-state.ts";
 import { formatTurnTelemetry, TurnTelemetryTracker } from "./telemetry.ts";
+import { registerTodoIntegration } from "./todo.ts";
 import { installCompactUserMessages } from "./user-message.ts";
 import {
 	createInitialState,
@@ -56,6 +58,7 @@ function isTuiContext(ctx: ExtensionContext): boolean {
 
 export function registerOpenTui(pi: ExtensionAPI, spinnerDependencies?: SpinnerDependencies) {
 	registerClearCommand(pi);
+	registerTodoIntegration(pi);
 
 	const sessionLifecycle = new SessionLifecycle();
 	const state: FooterState = createInitialState();
@@ -341,6 +344,14 @@ export function registerOpenTui(pi: ExtensionAPI, spinnerDependencies?: SpinnerD
 		if (!sessionLifecycle.isCurrent()) return;
 		spinnerInstallation?.controller.beforeCompact();
 		stopWorkingTimer();
+	});
+
+	pi.on("session_compact_failed", (event, ctx) => {
+		if (!sessionLifecycle.isCurrent()) return;
+		stopWorkingTimer();
+		settleCompactionFailure(state, event.willRetry);
+		invalidateUsageCache();
+		refreshInteractiveState(ctx);
 	});
 
 	pi.on("session_compact", (_event, ctx) => {

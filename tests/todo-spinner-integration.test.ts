@@ -8,6 +8,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import type { Component, TUI } from "@earendil-works/pi-tui";
 import { DEFAULT_CONFIG } from "../extensions/open-tui/config.ts";
+import { TURN_COMPLETION_VERBS } from "../extensions/open-tui/spinner-completion-verbs.ts";
 import {
 	installSpinner,
 	type SpinnerDependencies,
@@ -176,7 +177,7 @@ test("spinner mounts directly above connected Todo rows and restored activeForm 
 	result.spinner.controller.agentEnd();
 	const idleLines = result.renderWidget(SPINNER_WIDGET_KEY);
 	assert.equal(idleLines.length, 1);
-	assert.match(idleLines[0] ?? "", /✻ Worked for 12s/);
+	assert.match(idleLines[0] ?? "", new RegExp(`✻ ${TURN_COMPLETION_VERBS[0]} for 12s`));
 	assert.match(result.renderWidget(TODO_WIDGET_KEY)[0] ?? "", /⎿/);
 
 	result.spinner.dispose();
