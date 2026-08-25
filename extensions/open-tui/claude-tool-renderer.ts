@@ -1,5 +1,11 @@
 import { ToolExecutionComponent, type Theme } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
+import {
+	formatClaudeMcpToolResult,
+	formatClaudeMcpToolUse,
+	identifyClaudeMcpTool,
+	type ClaudeMcpToolIdentity,
+} from "./claude-mcp-tool.ts";
 import { formatClaudeToolResult } from "./claude-tool-results.ts";
 import {
 	asString,
@@ -9,6 +15,14 @@ import {
 } from "./claude-tool-renderer-shared.ts";
 import { formatClaudeToolUse } from "./claude-tool-use.ts";
 
+export {
+	formatClaudeMcpToolResult,
+	formatClaudeMcpToolUse,
+	identifyClaudeMcpTool,
+	type ClaudeMcpToolIdentity,
+	type ClaudeMcpToolKind,
+	type ClaudeMcpToolUse,
+} from "./claude-mcp-tool.ts";
 export { formatClaudeToolResult } from "./claude-tool-results.ts";
 export {
 	displayPath,
@@ -46,6 +60,7 @@ interface ToolInternals {
 	isPartial?: unknown;
 	executionStarted?: unknown;
 	result?: unknown;
+	toolDefinition?: unknown;
 	ui?: unknown;
 }
 
@@ -175,7 +190,9 @@ function styleResultLine(
 	index: number,
 	line: string,
 	theme: Theme,
+	isMcp = false,
 ): string {
+	if (isMcp && line.startsWith("⚠ ")) return theme.fg("warning", line);
 	if (status === "error") return theme.fg("error", line);
 	if (status === "pending" || status === "running") return `${DIM}${line}${DIM_RESET}`;
 	const lower = toolName.toLowerCase();
@@ -187,6 +204,7 @@ function styleResultLine(
 	if (line.startsWith("… +")) return `${DIM}${line}${DIM_RESET}`;
 	if (lower === "read" && line === "Unchanged since last read") return `${DIM}${line}${DIM_RESET}`;
 	if (lower === "bash" && ["(No output)", "Done"].includes(line)) return `${DIM}${line}${DIM_RESET}`;
+	if (isMcp && line === "(No content)") return `${DIM}${line}${DIM_RESET}`;
 	return dimExpandHint(boldSummaryCounts(toolName, index, line, theme));
 }
 
@@ -196,15 +214,21 @@ function renderClaudeTool(
 	blink: ClaudeToolBlinkController,
 	theme: Theme,
 	width: number,
+	mcpIdentity?: ClaudeMcpToolIdentity,
 ): string[] {
 	const toolName = asString(tool.toolName) ?? "";
 	const cwd = asString(tool.cwd);
 	const expanded = tool.expanded === true;
-	const use = formatClaudeToolUse(toolName, tool.args, cwd, expanded);
+	const use = mcpIdentity
+		? formatClaudeMcpToolUse(mcpIdentity, tool.args, expanded)
+		: formatClaudeToolUse(toolName, tool.args, cwd, expanded);
 	const detail = use.detail ? `(${use.detail})` : "";
 	const first = `${statusDot(status, blink, theme)} ${theme.bold(use.name)}${detail}`;
-	const resultLines = formatClaudeToolResult(toolName, tool.args, tool.result, status, cwd, expanded)
-		.map((line, index) => styleResultLine(toolName, status, index, line, theme));
+	const rawResultLines = mcpIdentity
+		? formatClaudeMcpToolResult(tool.result, status, expanded)
+		: formatClaudeToolResult(toolName, tool.args, tool.result, status, cwd, expanded);
+	const resultLines = rawResultLines
+		.map((line, index) => styleResultLine(toolName, status, index, line, theme, mcpIdentity !== undefined));
 	const body = resultLines.length === 0
 		? first
 		: [first, `${responsePrefix()}${resultLines[0]}`, ...resultLines.slice(1).map((line) => `     ${line}`)].join("\n");
@@ -221,8 +245,15 @@ export function installClaudeToolRenderer(
 	const blink = options.blink ?? new ClaudeToolBlinkController();
 	const previousRender = prototype.render;
 	const claudeRender = function (this: ToolInternals, width: number): string[] {
-		const toolName = asString(this.toolName)?.toLowerCase();
-		if (!toolName || !NATIVE_TOOLS.has(toolName)) {
+		const toolName = asString(this.toolName);
+		const lowerToolName = toolName?.toLowerCase();
+		// Extension definitions remain attached to ToolExecutionComponent at runtime.
+		// Detect the adapter through its public tool names/labels so open-tui does
+		// not import, re-register, or depend on pi-mcp-adapter load order.
+		const mcpIdentity = toolName
+			? identifyClaudeMcpTool(toolName, this.toolDefinition, this.args)
+			: undefined;
+		if (!lowerToolName || (!NATIVE_TOOLS.has(lowerToolName) && !mcpIdentity)) {
 			if (typeof this === "object" && this) blink.remove(this);
 			return previousRender.call(this, width);
 		}
@@ -233,7 +264,7 @@ export function installClaudeToolRenderer(
 		}
 		blink.sync(this, this.ui, status === "running");
 		try {
-			return renderClaudeTool(this, status, blink, getTheme(), width);
+			return renderClaudeTool(this, status, blink, getTheme(), width, mcpIdentity);
 		} catch {
 			return previousRender.call(this, width);
 		}
