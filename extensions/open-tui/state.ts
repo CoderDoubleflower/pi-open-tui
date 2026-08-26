@@ -22,17 +22,57 @@ export interface UsageTotals {
 	latestCacheHitRate: number | undefined;
 }
 
-let usageCache: { key: string; totals: UsageTotals } | undefined;
+interface UsageCacheEntry {
+	sessionManager: ExtensionContext["sessionManager"];
+	assistantUsageKey: string;
+	totals: UsageTotals;
+}
 
-function entriesKey(ctx: ExtensionContext): string {
-	const entries = ctx.sessionManager.getEntries();
-	const last = entries.at(-1);
-	return `${entries.length}:${last?.id ?? ""}:${last?.timestamp ?? ""}`;
+let usageCache: UsageCacheEntry | undefined;
+let usageCacheDirty = true;
+
+/**
+ * Build a cache key from finalized assistant usage only.
+ *
+ * Pi emits lifecycle updates for user, tool-result, and custom messages as well,
+ * but those entries must not advance the displayed cache-hit snapshot. Usage is
+ * therefore refreshed only when a completed assistant response adds or changes
+ * provider-reported usage.
+ */
+function assistantUsageKey(ctx: ExtensionContext): string {
+	const parts: string[] = [];
+	for (const entry of ctx.sessionManager.getEntries()) {
+		if (entry.type !== "message" || entry.message?.role !== "assistant") continue;
+		const message = entry.message as AssistantMessage;
+		const usage = message.usage;
+		parts.push(JSON.stringify([
+			entry.id ?? null,
+			entry.timestamp ?? null,
+			usage?.input ?? null,
+			usage?.output ?? null,
+			usage?.cacheRead ?? null,
+			usage?.cacheWrite ?? null,
+			usage?.cost?.total ?? null,
+		]));
+	}
+	return parts.join("|");
 }
 
 export function getUsageTotals(ctx: ExtensionContext): UsageTotals {
-	const key = entriesKey(ctx);
-	if (usageCache && usageCache.key === key) return usageCache.totals;
+	const sessionManager = ctx.sessionManager;
+	if (usageCache && usageCache.sessionManager === sessionManager && !usageCacheDirty) {
+		return usageCache.totals;
+	}
+
+	const key = assistantUsageKey(ctx);
+	usageCacheDirty = false;
+	if (
+		usageCache
+		&& usageCache.sessionManager === sessionManager
+		&& usageCache.assistantUsageKey === key
+	) {
+		return usageCache.totals;
+	}
 
 	const totals: UsageTotals = {
 		input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0,
@@ -54,12 +94,19 @@ export function getUsageTotals(ctx: ExtensionContext): UsageTotals {
 			}
 		}
 	}
-	usageCache = { key, totals };
+	usageCache = { sessionManager, assistantUsageKey: key, totals };
 	return totals;
 }
 
+/**
+ * Mark usage for revalidation on the next footer render.
+ *
+ * Revalidation keeps the existing snapshot when only non-assistant entries were
+ * appended, matching Pi's behavior of updating cache-hit data after a complete
+ * assistant response rather than after every message lifecycle event.
+ */
 export function invalidateUsageCache(): void {
-	usageCache = undefined;
+	usageCacheDirty = true;
 }
 
 export function createInitialState(): FooterState {
