@@ -112,7 +112,7 @@ export function renderNativeSpinnerMessage(options: NativeSpinnerMessageOptions)
 			metadata.push(formatDuration(Math.max(0, nowMs - state.agentStartedAtMs!)));
 		}
 		if (config.showTokens) {
-			const tokens = spinnerDisplayTokens(state, config.reducedMotion);
+			const tokens = spinnerDisplayTokens(state);
 			if (tokens > 0) {
 				metadata.push(`${spinnerTokenDirection(state.mode)} ${formatSpinnerTokens(tokens)} tokens`);
 			}

@@ -37,6 +37,10 @@ const DOT = "●";
 const RESPONSE = "⎿";
 const DIM = "\x1b[2m";
 const DIM_RESET = "\x1b[22m";
+const BACKGROUND_RESET = "\x1b[49m";
+const EDIT_DIFF_INDENT = "     ";
+export const EDIT_DIFF_ADDED_BACKGROUND = "\x1b[48;5;22m";
+export const EDIT_DIFF_REMOVED_BACKGROUND = "\x1b[48;5;52m";
 const NATIVE_TOOLS = new Set(["read", "write", "edit", "bash", "grep", "find", "ls"]);
 
 export interface BlinkScheduler {
@@ -208,6 +212,38 @@ function styleResultLine(
 	return dimExpandHint(boldSummaryCounts(toolName, index, line, theme));
 }
 
+function editDiffBackground(line: string): string | undefined {
+	if (line.startsWith("+") && !line.startsWith("+++")) return EDIT_DIFF_ADDED_BACKGROUND;
+	if (line.startsWith("-") && !line.startsWith("---")) return EDIT_DIFF_REMOVED_BACKGROUND;
+	return undefined;
+}
+
+function renderEditResultLines(
+	rawResultLines: readonly string[],
+	resultLines: readonly string[],
+	width: number,
+): string[] {
+	if (resultLines.length === 0) return [];
+	const safeWidth = Math.max(1, width);
+	const rendered = new Text(`${responsePrefix()}${resultLines[0]}`, 0, 0).render(safeWidth);
+	const indentWidth = Math.min(EDIT_DIFF_INDENT.length, Math.max(0, safeWidth - 1));
+	const indent = EDIT_DIFF_INDENT.slice(0, indentWidth);
+	const contentWidth = Math.max(1, safeWidth - indentWidth);
+
+	for (let index = 1; index < resultLines.length; index++) {
+		const background = editDiffBackground(rawResultLines[index] ?? "");
+		const wrapped = new Text(resultLines[index] ?? "", 0, 0).render(contentWidth);
+		for (const line of wrapped) {
+			rendered.push(
+				background
+					? `${indent}${background}${line}${BACKGROUND_RESET}`
+					: `${indent}${line}`,
+			);
+		}
+	}
+	return rendered;
+}
+
 function renderClaudeTool(
 	tool: ToolInternals,
 	status: ClaudeToolStatus,
@@ -229,6 +265,20 @@ function renderClaudeTool(
 		: formatClaudeToolResult(toolName, tool.args, tool.result, status, cwd, expanded);
 	const resultLines = rawResultLines
 		.map((line, index) => styleResultLine(toolName, status, index, line, theme, mcpIdentity !== undefined));
+
+	if (
+		mcpIdentity === undefined
+		&& toolName.toLowerCase() === "edit"
+		&& status === "success"
+		&& resultLines.length > 1
+	) {
+		return [
+			"",
+			...new Text(first, 0, 0).render(width),
+			...renderEditResultLines(rawResultLines, resultLines, width),
+		];
+	}
+
 	const body = resultLines.length === 0
 		? first
 		: [first, `${responsePrefix()}${resultLines[0]}`, ...resultLines.slice(1).map((line) => `     ${line}`)].join("\n");

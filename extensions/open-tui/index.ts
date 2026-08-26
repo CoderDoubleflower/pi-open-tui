@@ -5,6 +5,7 @@ import { type OpenTuiConfig, DEFAULT_CONFIG, ensureConfigExists, loadConfig, sav
 import { installEditor } from "./editor.ts";
 import { installFooter } from "./footer.ts";
 import { installHeader } from "./header.ts";
+import { installFullscreenJumpToBottom } from "./fullscreen-scroll.ts";
 import { emptyGitStatus, readGitStatus } from "./git.ts";
 import { installClaudeStyleMarkdown } from "./markdown.ts";
 import { installOutputPrefixes } from "./output-prefix.ts";
@@ -71,6 +72,7 @@ export function registerOpenTui(pi: ExtensionAPI, spinnerDependencies?: SpinnerD
 	let spinnerTickTimer: ReturnType<typeof setInterval> | undefined;
 	let workingFooterTimer: ReturnType<typeof setInterval> | undefined;
 	let cleanupHeader: (() => void) | undefined;
+	let cleanupJumpToBottom: (() => void) | undefined;
 	let cleanupFooter: (() => void) | undefined;
 	let cleanupEditor: (() => void) | undefined;
 	let cleanupUserMessages: (() => void) | undefined;
@@ -90,6 +92,7 @@ export function registerOpenTui(pi: ExtensionAPI, spinnerDependencies?: SpinnerD
 		}
 		if (!active) {
 			cleanupHeader = installHeader(pi, ctx, config.fullscreen.wheelScrollLines);
+			cleanupJumpToBottom = installFullscreenJumpToBottom(ctx);
 			cleanupFooter = installFooter(
 				ctx,
 				() => state,
@@ -133,12 +136,14 @@ export function registerOpenTui(pi: ExtensionAPI, spinnerDependencies?: SpinnerD
 		if (active) {
 			spinnerInstallation?.dispose();
 			cleanupHeader?.();
+			cleanupJumpToBottom?.();
 			cleanupFooter?.();
 			cleanupEditor?.();
 			cleanupUserMessages?.();
 			cleanupOutputPrefixes?.();
 			cleanupMarkdown?.();
 			cleanupHeader = undefined;
+			cleanupJumpToBottom = undefined;
 			cleanupFooter = undefined;
 			cleanupEditor = undefined;
 			cleanupUserMessages = undefined;

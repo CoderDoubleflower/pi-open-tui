@@ -177,30 +177,36 @@ test("agent state renders through the custom widget", () => {
 	result.installation!.dispose();
 });
 
-test("streamed response length drives spinner tokens while provider usage stays accounted", () => {
+test("provider usage, not streamed character length, drives spinner tokens", () => {
 	const result = setup();
 	result.config.verbose = true;
 	const controller = result.installation!.controller;
 	controller.agentStart(null, false);
 	assert.match(result.renderWidget()[0] ?? "", /Working… \(0s\)/);
 
+	const usage = { input: 50, output: 25, cacheRead: 150, cacheWrite: 10 };
 	controller.messageUpdate(
 		{ type: "text_delta", delta: "x".repeat(400) },
-		{ input: 50, output: 25 },
+		usage,
 	);
-	assert.equal(controller.state.inputTokens, 50);
+	assert.equal(controller.state.inputTokens, 210);
 	assert.equal(controller.state.outputTokens, 25);
 	assert.equal(controller.state.responseLength, 400);
-	assert.doesNotMatch(result.renderWidget()[0] ?? "", /↑ 50 tokens/);
+	assert.match(result.renderWidget()[0] ?? "", /↓ 25 tokens/);
+	assert.doesNotMatch(result.renderWidget()[0] ?? "", /100 tokens/);
 
 	result.clock.value = 250;
 	controller.tick();
-	assert.match(result.renderWidget()[0] ?? "", /↓ 63 tokens/);
+	assert.match(result.renderWidget()[0] ?? "", /↓ 25 tokens/);
+
+	controller.messageEnd(usage);
+	controller.turnStart();
+	assert.match(result.renderWidget()[0] ?? "", /↑ 210 tokens/);
 
 	result.clock.value = 60_000;
 	controller.tick();
 	assert.match(result.renderWidget()[0] ?? "", /1m 0s/);
-	assert.match(result.renderWidget()[0] ?? "", /↓ 100 tokens/);
+	assert.match(result.renderWidget()[0] ?? "", /↑ 210 tokens/);
 	result.installation!.dispose();
 });
 

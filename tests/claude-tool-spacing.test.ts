@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import {
+	EDIT_DIFF_ADDED_BACKGROUND,
+	EDIT_DIFF_REMOVED_BACKGROUND,
 	formatClaudeMcpToolResult,
 	formatClaudeMcpToolUse,
 	identifyClaudeMcpTool,
@@ -37,6 +39,49 @@ test("native Claude tool renderer preserves one leading spacer line", () => {
 		assert.equal(lines[0], "");
 		assert.ok(lines[1]?.includes("● Read(src/a.ts)"));
 		assert.ok(lines[2]?.includes("⎿  Read 2 lines"));
+	} finally {
+		cleanup();
+	}
+});
+
+test("successful edit diffs paint added and removed rows to the available width", () => {
+	const prototype = {
+		render(_width: number): string[] {
+			return ["ORIGINAL"];
+		},
+	};
+	const cleanup = installClaudeToolRenderer(() => theme, { prototype });
+	try {
+		const edit = {
+			toolName: "edit",
+			args: { path: "/repo/src/a.ts" },
+			cwd: "/repo",
+			expanded: false,
+			isPartial: false,
+			executionStarted: true,
+			result: {
+				isError: false,
+				content: [{ type: "text", text: "Successfully replaced 1 block" }],
+				details: {
+					diff: " 1 unchanged\n-2 old value\n+2 new value\n 3 unchanged",
+				},
+			},
+			ui: { requestRender() {} },
+		};
+		const width = 48;
+		const lines = prototype.render.call(edit, width);
+		const removed = lines.find((line) => stripAnsi(line).includes("-2 old value"));
+		const added = lines.find((line) => stripAnsi(line).includes("+2 new value"));
+		const context = lines.find((line) => stripAnsi(line).includes(" 1 unchanged"));
+
+		assert.ok(removed);
+		assert.ok(added);
+		assert.ok(context);
+		assert.ok(removed.startsWith(`     ${EDIT_DIFF_REMOVED_BACKGROUND}`));
+		assert.ok(added.startsWith(`     ${EDIT_DIFF_ADDED_BACKGROUND}`));
+		assert.equal(stripAnsi(removed).length, width);
+		assert.equal(stripAnsi(added).length, width);
+		assert.doesNotMatch(context, /\x1b\[48;5;(?:22|52)m/);
 	} finally {
 		cleanup();
 	}

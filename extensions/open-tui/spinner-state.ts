@@ -3,7 +3,6 @@ export const THOUGHT_VISIBLE_MS = 2_000;
 export const STALL_DELAY_MS = 3_000;
 export const STALL_RAMP_MS = 2_000;
 export const TOKEN_COUNTER_FRAME_MS = 50;
-export const TOKEN_ESTIMATE_CHARS_PER_TOKEN = 4;
 
 export type SpinnerMode =
 	| "requesting"
@@ -33,16 +32,17 @@ export interface SpinnerRuntimeState {
 	agentCompletedDurationMs: number | null;
 	turnStartedAtMs: number | null;
 	randomVerb: string;
-	/** Real provider-reported usage retained for telemetry/accounting. */
+	/** Provider-reported prompt tokens, including cache reads and cache writes. */
 	inputTokens: number;
+	/** Provider-reported output tokens. */
 	outputTokens: number;
 	completedInputTokens: number;
 	completedOutputTokens: number;
 	currentInputTokens: number;
 	currentOutputTokens: number;
-	/** Claude-style spinner counter source: streamed assistant response length. */
+	/** Streamed response characters retained for activity animation only, never token display. */
 	responseLength: number;
-	/** Smoothed response length used by the visible spinner token estimate. */
+	/** Smoothed response-character count retained for retry continuity only. */
 	displayedResponseLength: number;
 	lastTokenAnimationAtMs: number | null;
 	lastResponseAtMs: number | null;
@@ -64,6 +64,8 @@ export type SpinnerMessageEvent =
 export interface SpinnerTokenUsage {
 	input?: number;
 	output?: number;
+	cacheRead?: number;
+	cacheWrite?: number;
 }
 
 export interface SpinnerStateOptions {
@@ -117,14 +119,13 @@ export function thoughtDurationSeconds(state: SpinnerRuntimeState): number | nul
 	return Math.max(1, Math.round(state.thinkingActualDurationMs / 1_000));
 }
 
-export function spinnerDisplayTokens(
-	state: SpinnerRuntimeState,
-	reducedMotion = false,
-): number {
-	const responseLength = reducedMotion
-		? state.responseLength
-		: state.displayedResponseLength;
-	return Math.round(responseLength / TOKEN_ESTIMATE_CHARS_PER_TOKEN);
+/**
+ * Return the real provider-reported token total matching the current transfer
+ * direction. Requesting is upstream prompt usage; every response/tool phase is
+ * downstream output usage.
+ */
+export function spinnerDisplayTokens(state: SpinnerRuntimeState): number {
+	return state.mode === "requesting" ? state.inputTokens : state.outputTokens;
 }
 
 export class SpinnerStateMachine {
@@ -202,7 +203,7 @@ export class SpinnerStateMachine {
 				this.runtimeState.mode = "thinking";
 				if (event.delta.length > 0) {
 					if (this.runtimeState.thinkingPhase !== "thinking") this.startThinking();
-					this.recordDelta(event.delta);
+					this.recordResponseActivity(event.delta);
 				}
 				break;
 			case "thinking_end":
@@ -213,14 +214,14 @@ export class SpinnerStateMachine {
 				break;
 			case "text_delta":
 				this.runtimeState.mode = "responding";
-				this.recordDelta(event.delta);
+				this.recordResponseActivity(event.delta);
 				break;
 			case "toolcall_start":
 				this.runtimeState.mode = "tool-input";
 				break;
 			case "toolcall_delta":
 				this.runtimeState.mode = "tool-input";
-				this.recordDelta(event.delta);
+				this.recordResponseActivity(event.delta);
 				break;
 		}
 	}
@@ -256,7 +257,7 @@ export class SpinnerStateMachine {
 		if (this.runtimeState.phase !== "running") return;
 		const now = this.options.clock.now();
 		this.advanceThinking(now);
-		this.advanceTokenCounter(now);
+		this.advanceActivityCounter(now);
 		this.runtimeState.stalledIntensity = this.calculateStallIntensity(now);
 	}
 
@@ -286,7 +287,7 @@ export class SpinnerStateMachine {
 		}
 	}
 
-	private recordDelta(delta: string): void {
+	private recordResponseActivity(delta: string): void {
 		if (delta.length === 0) return;
 		this.runtimeState.responseLength += delta.length;
 		this.runtimeState.lastResponseAtMs = this.options.clock.now();
@@ -312,7 +313,7 @@ export class SpinnerStateMachine {
 		}
 	}
 
-	private advanceTokenCounter(now: number): void {
+	private advanceActivityCounter(now: number): void {
 		const state = this.runtimeState;
 		const lastAnimationAt = state.lastTokenAnimationAtMs;
 		if (lastAnimationAt === null) {
@@ -340,7 +341,7 @@ export class SpinnerStateMachine {
 	private updateCurrentTokenUsage(usage: SpinnerTokenUsage | undefined): void {
 		const state = this.runtimeState;
 		if (usage) {
-			const input = normalizeTokenCount(usage.input);
+			const input = providerPromptTokens(usage);
 			const output = normalizeTokenCount(usage.output);
 			if (input !== null) state.currentInputTokens = Math.max(state.currentInputTokens, input);
 			if (output !== null) state.currentOutputTokens = Math.max(state.currentOutputTokens, output);
@@ -375,6 +376,14 @@ export class SpinnerStateMachine {
 		if (state.phase !== "running" || state.activeToolIds.size > 0 || state.lastResponseAtMs === null) return 0;
 		return Math.min(1, Math.max(0, (now - state.lastResponseAtMs - STALL_DELAY_MS) / STALL_RAMP_MS));
 	}
+}
+
+function providerPromptTokens(usage: SpinnerTokenUsage): number | null {
+	const input = normalizeTokenCount(usage.input);
+	const cacheRead = normalizeTokenCount(usage.cacheRead);
+	const cacheWrite = normalizeTokenCount(usage.cacheWrite);
+	if (input === null && cacheRead === null && cacheWrite === null) return null;
+	return (input ?? 0) + (cacheRead ?? 0) + (cacheWrite ?? 0);
 }
 
 function normalizeTokenCount(value: number | null | undefined): number | null {

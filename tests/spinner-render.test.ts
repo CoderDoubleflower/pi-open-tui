@@ -42,47 +42,49 @@ function render(
 	}) ?? "";
 }
 
-test("renders one Claude-style token counter with direction derived from mode", () => {
+test("renders real provider token usage with direction derived from mode", () => {
 	for (const mode of ["requesting", "thinking", "responding", "tool-input", "tool-use"] as SpinnerMode[]) {
 		const message = render(activeState({
 			mode,
 			inputTokens: 4_800,
 			outputTokens: 1_200,
-			responseLength: 4_800,
-			displayedResponseLength: 4_800,
+			responseLength: 40_000,
+			displayedResponseLength: 40_000,
 		}));
-		const arrow = mode === "requesting" ? "↑" : "↓";
+		const expected = mode === "requesting" ? "↑ 4.8k tokens" : "↓ 1.2k tokens";
 		assert.match(message, /^Working…/);
-		assert.match(message, new RegExp(`${arrow} 1\\.2k tokens`));
-		assert.doesNotMatch(message, /4\.8k tokens/);
+		assert.ok(message.includes(expected));
+		assert.doesNotMatch(message, /10\.0k tokens/);
 		assert.equal((message.match(/tokens/g) ?? []).length, 1);
 	}
 });
 
-test("real provider usage is retained in state but not rendered as spinner token segments", () => {
-	const message = render(activeState({
-		mode: "responding",
-		inputTokens: 4_800,
-		outputTokens: 1_200,
-	}));
-	assert.equal(message, "Working… (31s)");
+test("omits the token segment until provider usage exists for the active direction", () => {
+	assert.equal(
+		render(activeState({ mode: "requesting", inputTokens: 0, outputTokens: 1_200 })),
+		"Working… (31s)",
+	);
+	assert.equal(
+		render(activeState({ mode: "responding", inputTokens: 4_800, outputTokens: 0 })),
+		"Working… (31s)",
+	);
 });
 
-test("uses Claude-style compact token formatting", () => {
+test("uses compact formatting for real provider token totals", () => {
 	assert.equal(
 		render(activeState({
 			mode: "responding",
-			responseLength: 40_000,
-			displayedResponseLength: 40_000,
+			outputTokens: 10_000,
 		})),
 		"Working… (31s · ↓ 10.0k tokens)",
 	);
 });
 
-test("reduced motion snaps the visible token estimate to the streamed response length", () => {
+test("reduced motion does not replace provider usage with a character estimate", () => {
 	const state = activeState({
 		mode: "responding",
-		responseLength: 400,
+		outputTokens: 100,
+		responseLength: 40_000,
 		displayedResponseLength: 0,
 	});
 	const config = structuredClone(DEFAULT_CONFIG.spinner);
@@ -112,8 +114,6 @@ test("orders native message metadata as timer, tokens, thinking", () => {
 		mode: "responding",
 		inputTokens: 2_000,
 		outputTokens: 1_200,
-		responseLength: 4_800,
-		displayedResponseLength: 4_800,
 		thinkingPhase: "thinking",
 		effectiveEffort: "high",
 	}));
@@ -125,8 +125,8 @@ test("orders native message metadata as timer, tokens, thinking", () => {
 
 test("uses the strict 30 second metadata gate", () => {
 	const state = activeState({
-		responseLength: 400,
-		displayedResponseLength: 400,
+		mode: "requesting",
+		inputTokens: 100,
 	});
 	assert.equal(render(state, { nowMs: 29_999, verbose: false }), "Working…");
 	assert.equal(render(state, { nowMs: 30_000, verbose: false }), "Working…");
@@ -140,12 +140,11 @@ test("uses the strict 30 second metadata gate", () => {
 	);
 });
 
-test("verbose native message exposes metrics immediately", () => {
+test("verbose native message exposes provider metrics immediately", () => {
 	assert.equal(
 		render(activeState({
 			mode: "responding",
-			responseLength: 400,
-			displayedResponseLength: 400,
+			outputTokens: 100,
 		}), { nowMs: 1_000 }),
 		"Working… (1s · ↓ 100 tokens)",
 	);
@@ -156,8 +155,6 @@ test("honors native message segment and effort display switches", () => {
 		mode: "responding",
 		inputTokens: 400,
 		outputTokens: 100,
-		responseLength: 400,
-		displayedResponseLength: 400,
 		thinkingPhase: "thinking",
 		effectiveEffort: "high",
 	});
@@ -186,8 +183,6 @@ test("orders suffix before timer, tokens, and thinking", () => {
 		mode: "responding",
 		inputTokens: 2_000,
 		outputTokens: 1_200,
-		responseLength: 4_800,
-		displayedResponseLength: 4_800,
 		thinkingPhase: "thinking",
 		effectiveEffort: "high",
 	});
