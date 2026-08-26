@@ -8,7 +8,6 @@ import {
 	createFullscreenJumpToBottomWidget,
 	DEFAULT_FULLSCREEN_WHEEL_SCROLL_LINES,
 	FULLSCREEN_JUMP_TO_BOTTOM_LABEL,
-	FULLSCREEN_JUMP_TO_BOTTOM_URL,
 	MAX_FULLSCREEN_WHEEL_SCROLL_LINES,
 	MIN_FULLSCREEN_WHEEL_SCROLL_LINES,
 	normalizeFullscreenWheelScrollLines,
@@ -17,9 +16,33 @@ import {
 import { stripAnsi } from "../extensions/open-tui/utils.ts";
 
 const theme = {
-	bg: (_color: string, text: string) => text,
-	bold: (text: string) => text,
+	bg: (color: string, text: string) => color === "selectedBg"
+		? `\x1b[42m${text}\x1b[49m`
+		: `\x1b[40m${text}\x1b[49m`,
+	bold: (text: string) => `\x1b[1m${text}\x1b[22m`,
 } as Theme;
+
+interface TestMouseEvent {
+	button: number;
+	x: number;
+	y: number;
+	release: boolean;
+}
+
+function buttonColumn(line: string): number {
+	return stripAnsi(line).indexOf(FULLSCREEN_JUMP_TO_BOTTOM_LABEL);
+}
+
+function createFunctionWrappingTuiReference<T extends object>(target: T): T {
+	return new Proxy({} as T, {
+		get: (_proxyTarget, property) => {
+			const value = Reflect.get(target, property, target);
+			if (typeof value !== "function") return value;
+			return (...args: unknown[]) => Reflect.apply(value, target, args);
+		},
+		set: (_proxyTarget, property, value) => Reflect.set(target, property, value, target),
+	});
+}
 
 test("defaults fullscreen mouse wheel scrolling to four lines", () => {
 	assert.equal(DEFAULT_FULLSCREEN_WHEEL_SCROLL_LINES, 4);
@@ -71,13 +94,13 @@ test("jump-to-bottom visibility follows the fullscreen viewport follow state", (
 	assert.equal(shouldShowFullscreenJumpToBottom(inline), false);
 });
 
-test("jump-to-bottom widget is clickable, centered, and preserves normal URL handling", () => {
+test("jump-to-bottom widget highlights the whole button on hover and handles clicks without OSC 8", () => {
 	let following = false;
 	let jumps = 0;
-	const opened: string[] = [];
-	const originalOpenUrl = (url: string) => opened.push(url);
+	let selectionEvents = 0;
 	const tui = {
 		mode: "fullscreen",
+		previousScreen: [] as string[],
 		get isFollowingOutput() {
 			return following;
 		},
@@ -85,38 +108,84 @@ test("jump-to-bottom widget is clickable, centered, and preserves normal URL han
 			jumps++;
 			following = true;
 		},
-		openUrl: originalOpenUrl,
+		handleSelectionMouseEvent() {
+			selectionEvents++;
+		},
 		requestRender() {},
 	} as unknown as TUI;
 	const widget = createFullscreenJumpToBottomWidget(tui, theme);
 	const line = widget.render(80)[0] ?? "";
+	const mouseX = buttonColumn(line);
+	(tui as unknown as { previousScreen: string[] }).previousScreen = [line];
 
-	assert.ok(line.includes(FULLSCREEN_JUMP_TO_BOTTOM_URL));
+	assert.ok(!line.includes("\x1b]8;"));
+	assert.ok(line.includes("\x1b[40m"));
 	assert.equal(stripAnsi(line).trim(), FULLSCREEN_JUMP_TO_BOTTOM_LABEL);
 	assert.ok(stripAnsi(line).startsWith(" "));
 
-	const patched = (tui as unknown as { openUrl(url: string): void }).openUrl;
-	patched(FULLSCREEN_JUMP_TO_BOTTOM_URL);
+	const patched = (tui as unknown as { handleSelectionMouseEvent(event: TestMouseEvent): void })
+		.handleSelectionMouseEvent;
+	patched({ button: 32, x: mouseX, y: 0, release: false });
+	assert.ok((widget.render(80)[0] ?? "").includes("\x1b[42m"));
+
+	patched({ button: 0, x: mouseX, y: 0, release: false });
+	patched({ button: 0, x: mouseX, y: 0, release: true });
 	assert.equal(jumps, 1);
 	assert.deepEqual(widget.render(80), []);
 
-	patched("https://example.com");
-	assert.deepEqual(opened, ["https://example.com"]);
+	widget.dispose();
+	(tui as unknown as { handleSelectionMouseEvent(event: TestMouseEvent): void })
+		.handleSelectionMouseEvent({ button: 32, x: 0, y: 0, release: false });
+	assert.equal(selectionEvents, 1);
+});
+
+test("jump-to-bottom widget works through Pi's function-wrapping TUI proxy", () => {
+	let following = false;
+	let jumps = 0;
+	let selectionEvents = 0;
+	const target = {
+		mode: "fullscreen",
+		previousScreen: [] as string[],
+		get isFollowingOutput() {
+			return following;
+		},
+		scrollToBottom() {
+			jumps++;
+			following = true;
+		},
+		handleSelectionMouseEvent() {
+			selectionEvents++;
+		},
+		requestRender() {},
+	};
+	const tui = createFunctionWrappingTuiReference(target) as unknown as TUI;
+	const widget = createFullscreenJumpToBottomWidget(tui, theme);
+	const line = widget.render(80)[0] ?? "";
+	const mouseX = buttonColumn(line);
+	target.previousScreen = [line];
+
+	assert.ok(!line.includes("\x1b]8;"));
+	(tui as unknown as { handleSelectionMouseEvent(event: TestMouseEvent): void })
+		.handleSelectionMouseEvent({ button: 0, x: mouseX, y: 0, release: false });
+	(tui as unknown as { handleSelectionMouseEvent(event: TestMouseEvent): void })
+		.handleSelectionMouseEvent({ button: 0, x: mouseX, y: 0, release: true });
+	assert.equal(jumps, 1);
+	assert.deepEqual(widget.render(80), []);
 
 	widget.dispose();
-	assert.equal((tui as unknown as { openUrl: (url: string) => void }).openUrl, originalOpenUrl);
+	(tui as unknown as { handleSelectionMouseEvent(event: TestMouseEvent): void })
+		.handleSelectionMouseEvent({ button: 32, x: 0, y: 0, release: false });
+	assert.equal(selectionEvents, 1);
 });
 
 test("jump-to-bottom widget stays hidden outside fullscreen mode", () => {
-	const originalOpenUrl = (_url: string) => {};
 	const tui = {
 		mode: "regular",
 		isFollowingOutput: false,
 		scrollToBottom() {},
-		openUrl: originalOpenUrl,
+		handleSelectionMouseEvent() {},
 	} as unknown as TUI;
 	const widget = createFullscreenJumpToBottomWidget(tui, theme);
 	assert.deepEqual(widget.render(80), []);
-	assert.equal((tui as unknown as { openUrl: (url: string) => void }).openUrl, originalOpenUrl);
 	widget.dispose();
 });

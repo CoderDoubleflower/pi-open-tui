@@ -201,8 +201,8 @@ function styleResultLine(
 	if (status === "pending" || status === "running") return `${DIM}${line}${DIM_RESET}`;
 	const lower = toolName.toLowerCase();
 	if (lower === "edit" && index > 0) {
-		if (line.startsWith("+") && !line.startsWith("+++")) return theme.fg("toolDiffAdded", line);
-		if (line.startsWith("-") && !line.startsWith("---")) return theme.fg("toolDiffRemoved", line);
+		if (line.startsWith("+") && !line.startsWith("+++")) return theme.fg("text", line);
+		if (line.startsWith("-") && !line.startsWith("---")) return theme.fg("text", line);
 		return theme.fg("toolDiffContext", line);
 	}
 	if (line.startsWith("… +")) return `${DIM}${line}${DIM_RESET}`;

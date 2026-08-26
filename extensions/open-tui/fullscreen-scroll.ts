@@ -1,5 +1,6 @@
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import {
+	stripTerminalSequences,
 	truncateToWidth,
 	visibleWidth,
 	type Component,
@@ -10,8 +11,8 @@ export const MIN_FULLSCREEN_WHEEL_SCROLL_LINES = 1;
 export const MAX_FULLSCREEN_WHEEL_SCROLL_LINES = 10;
 export const DEFAULT_FULLSCREEN_WHEEL_SCROLL_LINES = 4;
 export const FULLSCREEN_JUMP_TO_BOTTOM_WIDGET_KEY = "open-tui:jump-to-bottom";
-export const FULLSCREEN_JUMP_TO_BOTTOM_URL = "pi-open-tui://jump-to-bottom";
 export const FULLSCREEN_JUMP_TO_BOTTOM_LABEL = "Jump to bottom (ctrl+End) ↓";
+const FULLSCREEN_JUMP_TO_BOTTOM_MOUSE_HANDLER_OWNER = Symbol("open-tui:jump-to-bottom-mouse-handler-owner");
 
 export function normalizeFullscreenWheelScrollLines(
 	value: unknown,
@@ -24,12 +25,21 @@ export function normalizeFullscreenWheelScrollLines(
 	);
 }
 
+interface FullscreenMouseEvent {
+	button: number;
+	x: number;
+	y: number;
+	release: boolean;
+}
+
 type FullscreenViewportTui = TUI & {
 	mode?: string;
 	wheelScrollLines?: number;
 	isFollowingOutput?: boolean;
 	scrollToBottom?: () => void;
-	openUrl?: (url: string) => void;
+	previousScreen?: string[];
+	handleSelectionMouseEvent?: (event: FullscreenMouseEvent) => void;
+	[FULLSCREEN_JUMP_TO_BOTTOM_MOUSE_HANDLER_OWNER]?: object;
 };
 
 /**
@@ -55,40 +65,85 @@ export function shouldShowFullscreenJumpToBottom(tui: TUI): boolean {
 		&& typeof fullscreenTui.scrollToBottom === "function";
 }
 
-function osc8Link(url: string, text: string): string {
-	return `\x1b]8;;${url}\x07${text}\x1b]8;;\x07`;
+function isJumpToBottomButtonHit(tui: FullscreenViewportTui, event: FullscreenMouseEvent): boolean {
+	const line = tui.previousScreen?.[event.y];
+	if (!line) return false;
+	const plain = stripTerminalSequences(line);
+	const labelStart = plain.indexOf(FULLSCREEN_JUMP_TO_BOTTOM_LABEL);
+	if (labelStart < 0) return false;
+	const buttonStart = Math.max(0, labelStart - 1);
+	const buttonEnd = labelStart + visibleWidth(FULLSCREEN_JUMP_TO_BOTTOM_LABEL) + 1;
+	return event.x >= buttonStart && event.x < buttonEnd;
 }
 
 /**
- * Pi 0.84.3 does not expose mouse handlers on extension components, but its
- * fullscreen renderer activates OSC 8 links through the TUI's openUrl callback.
- * Intercept one private URL and preserve normal link handling for every other URL.
+ * Pi 0.84.3 consumes fullscreen mouse input before extension listeners run.
+ * Wrap its selection handler so this fixed widget can provide hover and click
+ * behavior without relying on terminal-controlled OSC 8 link decoration.
  */
-function installJumpToBottomUrlHandler(tui: TUI): (() => void) | undefined {
+function installJumpToBottomMouseHandler(
+	tui: TUI,
+	onHoverChange: (hovered: boolean) => void,
+): (() => void) | undefined {
 	const fullscreenTui = tui as FullscreenViewportTui;
-	if (fullscreenTui.mode !== "fullscreen" || typeof fullscreenTui.scrollToBottom !== "function") {
+	if (
+		fullscreenTui.mode !== "fullscreen"
+		|| typeof fullscreenTui.scrollToBottom !== "function"
+		|| typeof fullscreenTui.handleSelectionMouseEvent !== "function"
+	) {
 		return undefined;
 	}
 
-	const originalOpenUrl = fullscreenTui.openUrl;
-	const handler = (url: string) => {
-		if (url === FULLSCREEN_JUMP_TO_BOTTOM_URL) {
-			fullscreenTui.scrollToBottom?.call(fullscreenTui);
+	const originalHandler = fullscreenTui.handleSelectionMouseEvent;
+	const owner = {};
+	let pressed = false;
+	const handler = (event: FullscreenMouseEvent) => {
+		const hit = shouldShowFullscreenJumpToBottom(fullscreenTui)
+			&& isJumpToBottomButtonHit(fullscreenTui, event);
+		onHoverChange(hit);
+
+		if ((event.button & 32) !== 0) {
+			if (!hit && !pressed) originalHandler.call(fullscreenTui, event);
 			return;
 		}
-		originalOpenUrl?.call(fullscreenTui, url);
+
+		if (event.release) {
+			const wasPressed = pressed;
+			pressed = false;
+			if (wasPressed && hit) fullscreenTui.scrollToBottom?.call(fullscreenTui);
+			if (!wasPressed) originalHandler.call(fullscreenTui, event);
+			return;
+		}
+
+		if ((event.button & 3) === 0 && hit) {
+			pressed = true;
+			return;
+		}
+		originalHandler.call(fullscreenTui, event);
 	};
 
 	try {
-		fullscreenTui.openUrl = handler;
+		fullscreenTui.handleSelectionMouseEvent = handler;
+		fullscreenTui[FULLSCREEN_JUMP_TO_BOTTOM_MOUSE_HANDLER_OWNER] = owner;
 	} catch {
+		try {
+			fullscreenTui.handleSelectionMouseEvent = originalHandler;
+		} catch {}
 		return undefined;
 	}
-	if (fullscreenTui.openUrl !== handler) return undefined;
+	if (fullscreenTui[FULLSCREEN_JUMP_TO_BOTTOM_MOUSE_HANDLER_OWNER] !== owner) {
+		try {
+			fullscreenTui.handleSelectionMouseEvent = originalHandler;
+		} catch {}
+		return undefined;
+	}
 
 	return () => {
-		if (fullscreenTui.openUrl === handler) {
-			fullscreenTui.openUrl = originalOpenUrl;
+		if (fullscreenTui[FULLSCREEN_JUMP_TO_BOTTOM_MOUSE_HANDLER_OWNER] === owner) {
+			try {
+				fullscreenTui.handleSelectionMouseEvent = originalHandler;
+				fullscreenTui[FULLSCREEN_JUMP_TO_BOTTOM_MOUSE_HANDLER_OWNER] = undefined;
+			} catch {}
 		}
 	};
 }
@@ -96,29 +151,34 @@ function installJumpToBottomUrlHandler(tui: TUI): (() => void) | undefined {
 class FullscreenJumpToBottomWidget implements Component {
 	private readonly tui: TUI;
 	private readonly theme: Theme;
-	private readonly restoreOpenUrl: (() => void) | undefined;
+	private readonly restoreMouseHandler: (() => void) | undefined;
+	private hovered = false;
 	private disposed = false;
 
 	constructor(tui: TUI, theme: Theme) {
 		this.tui = tui;
 		this.theme = theme;
-		this.restoreOpenUrl = installJumpToBottomUrlHandler(tui);
+		this.restoreMouseHandler = installJumpToBottomMouseHandler(tui, (hovered) => {
+			if (this.hovered === hovered) return;
+			this.hovered = hovered;
+			this.tui.requestRender();
+		});
 	}
 
 	render(width: number): string[] {
 		if (
 			this.disposed
-			|| this.restoreOpenUrl === undefined
+			|| this.restoreMouseHandler === undefined
 			|| width <= 0
 			|| !shouldShowFullscreenJumpToBottom(this.tui)
 		) return [];
 
 		const label = ` ${FULLSCREEN_JUMP_TO_BOTTOM_LABEL} `;
 		const clipped = truncateToWidth(label, width, width > 1 ? "…" : "");
-		const button = this.theme.bg("userMessageBg", this.theme.bold(clipped));
-		const linked = osc8Link(FULLSCREEN_JUMP_TO_BOTTOM_URL, button);
-		const leftPadding = Math.max(0, Math.floor((width - visibleWidth(linked)) / 2));
-		return [`${" ".repeat(leftPadding)}${linked}`];
+		const background = this.hovered ? "selectedBg" : "userMessageBg";
+		const button = this.theme.bg(background, this.theme.bold(clipped));
+		const leftPadding = Math.max(0, Math.floor((width - visibleWidth(button)) / 2));
+		return [`${" ".repeat(leftPadding)}${button}`];
 	}
 
 	invalidate(): void {}
@@ -126,7 +186,7 @@ class FullscreenJumpToBottomWidget implements Component {
 	dispose(): void {
 		if (this.disposed) return;
 		this.disposed = true;
-		this.restoreOpenUrl?.();
+		this.restoreMouseHandler?.();
 	}
 }
 

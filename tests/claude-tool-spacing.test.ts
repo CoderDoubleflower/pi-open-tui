@@ -17,6 +17,14 @@ const theme = {
 	fg: (_name: string, text: string) => text,
 } as unknown as Theme;
 
+const diffTheme = {
+	...theme,
+	fg: (name: string, text: string) => {
+		const color = name === "text" ? 255 : name === "toolDiffAdded" ? 2 : name === "toolDiffRemoved" ? 1 : 8;
+		return `\x1b[38;5;${color}m${text}\x1b[39m`;
+	},
+} as unknown as Theme;
+
 test("native Claude tool renderer preserves one leading spacer line", () => {
 	const prototype = {
 		render(_width: number): string[] {
@@ -50,7 +58,7 @@ test("successful edit diffs paint added and removed rows to the available width"
 			return ["ORIGINAL"];
 		},
 	};
-	const cleanup = installClaudeToolRenderer(() => theme, { prototype });
+	const cleanup = installClaudeToolRenderer(() => diffTheme, { prototype });
 	try {
 		const edit = {
 			toolName: "edit",
@@ -79,6 +87,10 @@ test("successful edit diffs paint added and removed rows to the available width"
 		assert.ok(context);
 		assert.ok(removed.startsWith(`     ${EDIT_DIFF_REMOVED_BACKGROUND}`));
 		assert.ok(added.startsWith(`     ${EDIT_DIFF_ADDED_BACKGROUND}`));
+		assert.match(removed, /\x1b\[38;5;255m-2 old value\x1b\[39m/);
+		assert.match(added, /\x1b\[38;5;255m\+2 new value\x1b\[39m/);
+		assert.doesNotMatch(removed, /\x1b\[38;5;1m/);
+		assert.doesNotMatch(added, /\x1b\[38;5;2m/);
 		assert.equal(stripAnsi(removed).length, width);
 		assert.equal(stripAnsi(added).length, width);
 		assert.doesNotMatch(context, /\x1b\[48;5;(?:22|52)m/);
