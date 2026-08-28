@@ -174,17 +174,17 @@ test("timer and token metadata use the strict 30 second gate", () => {
 	assert.equal(shouldShowSpinnerMetrics(machine.state, 1, true), true);
 });
 
-test("stream deltas use complete provider prompt usage without waiting for a tick", () => {
+test("stream deltas exclude cache usage from input tokens without waiting for a tick", () => {
 	const { machine } = setup();
 	machine.agentStart();
 	machine.messageUpdate(
 		{ type: "text_delta", delta: "x".repeat(400) },
 		{ input: 80, output: 12, cacheRead: 900, cacheWrite: 20 },
 	);
-	assert.equal(machine.state.inputTokens, 1_000);
+	assert.equal(machine.state.inputTokens, 80);
 	assert.equal(machine.state.outputTokens, 12);
 	machine.tick();
-	assert.equal(machine.state.inputTokens, 1_000);
+	assert.equal(machine.state.inputTokens, 80);
 	assert.equal(machine.state.outputTokens, 12);
 });
 
@@ -206,23 +206,23 @@ test("provider usage accumulates real prompt and output totals across turns", ()
 		{ type: "text_delta", delta: "x".repeat(400) },
 		{ input: 80, output: 0, cacheRead: 20, cacheWrite: 5 },
 	);
-	assert.equal(machine.state.inputTokens, 105);
+	assert.equal(machine.state.inputTokens, 80);
 	assert.equal(machine.state.outputTokens, 0);
 
 	const firstUsage = { input: 80, output: 90, cacheRead: 20, cacheWrite: 5 };
 	machine.messageUpdate({ type: "done" }, firstUsage);
 	assert.equal(machine.state.outputTokens, 90);
 	machine.messageEnd(firstUsage);
-	assert.equal(machine.state.completedInputTokens, 105);
+	assert.equal(machine.state.completedInputTokens, 80);
 	assert.equal(machine.state.completedOutputTokens, 90);
 
 	machine.turnStart();
-	assert.equal(machine.state.inputTokens, 105);
+	assert.equal(machine.state.inputTokens, 80);
 	assert.equal(machine.state.outputTokens, 90);
 	machine.messageUpdate({ type: "thinking_delta", delta: "验证" });
 	assert.equal(machine.state.outputTokens, 90);
 	machine.messageEnd({ input: 100, output: 5, cacheRead: 50, cacheWrite: 0 });
-	assert.equal(machine.state.inputTokens, 255);
+	assert.equal(machine.state.inputTokens, 180);
 	assert.equal(machine.state.outputTokens, 95);
 });
 

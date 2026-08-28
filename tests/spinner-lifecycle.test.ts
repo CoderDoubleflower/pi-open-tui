@@ -189,7 +189,7 @@ test("provider usage, not streamed character length, drives spinner tokens", () 
 		{ type: "text_delta", delta: "x".repeat(400) },
 		usage,
 	);
-	assert.equal(controller.state.inputTokens, 210);
+	assert.equal(controller.state.inputTokens, 50);
 	assert.equal(controller.state.outputTokens, 25);
 	assert.equal(controller.state.responseLength, 400);
 	assert.match(result.renderWidget()[0] ?? "", /↓ 25 tokens/);
@@ -201,12 +201,12 @@ test("provider usage, not streamed character length, drives spinner tokens", () 
 
 	controller.messageEnd(usage);
 	controller.turnStart();
-	assert.match(result.renderWidget()[0] ?? "", /↑ 210 tokens/);
+	assert.match(result.renderWidget()[0] ?? "", /↑ 50 tokens/);
 
 	result.clock.value = 60_000;
 	controller.tick();
 	assert.match(result.renderWidget()[0] ?? "", /1m 0s/);
-	assert.match(result.renderWidget()[0] ?? "", /↑ 210 tokens/);
+	assert.match(result.renderWidget()[0] ?? "", /↑ 50 tokens/);
 	result.installation!.dispose();
 });
 

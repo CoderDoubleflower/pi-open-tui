@@ -32,7 +32,7 @@ export interface SpinnerRuntimeState {
 	agentCompletedDurationMs: number | null;
 	turnStartedAtMs: number | null;
 	randomVerb: string;
-	/** Provider-reported prompt tokens, including cache reads and cache writes. */
+	/** Provider-reported non-cached input tokens. */
 	inputTokens: number;
 	/** Provider-reported output tokens. */
 	outputTokens: number;
@@ -341,7 +341,7 @@ export class SpinnerStateMachine {
 	private updateCurrentTokenUsage(usage: SpinnerTokenUsage | undefined): void {
 		const state = this.runtimeState;
 		if (usage) {
-			const input = providerPromptTokens(usage);
+			const input = normalizeTokenCount(usage.input);
 			const output = normalizeTokenCount(usage.output);
 			if (input !== null) state.currentInputTokens = Math.max(state.currentInputTokens, input);
 			if (output !== null) state.currentOutputTokens = Math.max(state.currentOutputTokens, output);
@@ -376,14 +376,6 @@ export class SpinnerStateMachine {
 		if (state.phase !== "running" || state.activeToolIds.size > 0 || state.lastResponseAtMs === null) return 0;
 		return Math.min(1, Math.max(0, (now - state.lastResponseAtMs - STALL_DELAY_MS) / STALL_RAMP_MS));
 	}
-}
-
-function providerPromptTokens(usage: SpinnerTokenUsage): number | null {
-	const input = normalizeTokenCount(usage.input);
-	const cacheRead = normalizeTokenCount(usage.cacheRead);
-	const cacheWrite = normalizeTokenCount(usage.cacheWrite);
-	if (input === null && cacheRead === null && cacheWrite === null) return null;
-	return (input ?? 0) + (cacheRead ?? 0) + (cacheWrite ?? 0);
 }
 
 function normalizeTokenCount(value: number | null | undefined): number | null {

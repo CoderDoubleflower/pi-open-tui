@@ -151,7 +151,7 @@ test("stream chunks without visible segments do not request extra renders", () =
 	result.installation.dispose();
 });
 
-test("streamed response length, not provider usage, drives the visible token counter", () => {
+test("provider usage drives the visible token counter", () => {
 	const result = setup();
 	result.config.verbose = true;
 	result.config.showTimer = false;
@@ -168,13 +168,14 @@ test("streamed response length, not provider usage, drives the visible token cou
 
 	const settledRequests = result.renderRequests();
 	controller.messageUpdate({ type: "done" }, { input: 4_000, output: 2_000 });
-	assert.equal(result.renderRequests(), settledRequests);
+	assert.equal(result.renderRequests(), settledRequests + 1);
 	assert.equal(controller.state.inputTokens, 4_000);
 	assert.equal(controller.state.outputTokens, 2_000);
+	assert.match(result.renderWidget()[0] ?? "", /↓ 2\.0k tokens/);
 	result.installation.dispose();
 });
 
-test("non-reduced token counter advances on each Claude-style 50ms frame", () => {
+test("Claude-style 50ms frames never fabricate token usage", () => {
 	const result = setup();
 	result.config.verbose = true;
 	result.config.showTimer = false;
@@ -184,20 +185,13 @@ test("non-reduced token counter advances on each Claude-style 50ms frame", () =>
 	controller.messageUpdate({ type: "text_delta", delta: "x".repeat(400) });
 	assert.doesNotMatch(result.renderWidget()[0] ?? "", /tokens/);
 
-	for (const [nowMs, tokens] of [
-		[50, 13],
-		[100, 25],
-		[150, 38],
-		[200, 50],
-		[250, 63],
-	] as const) {
+	for (const nowMs of [50, 100, 150, 200, 250]) {
 		result.clock.value = nowMs;
 		controller.tick();
-		assert.match(result.renderWidget()[0] ?? "", new RegExp(`↓ ${tokens} tokens`));
+		assert.doesNotMatch(result.renderWidget()[0] ?? "", /tokens/);
 	}
 
-	result.clock.value = 5_000;
-	controller.tick();
+	controller.messageUpdate({ type: "done" }, { output: 100 });
 	assert.match(result.renderWidget()[0] ?? "", /↓ 100 tokens/);
 	result.installation.dispose();
 });
