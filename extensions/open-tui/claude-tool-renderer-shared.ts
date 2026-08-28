@@ -51,7 +51,8 @@ export function textOutputRaw(result: ToolResultLike | undefined): string {
 		.filter((block) => block.type === "text" && typeof block.text === "string")
 		.map((block) => block.text ?? "")
 		.join("\n")
-		.replace(/\r\n?/g, "\n");
+		.replace(/\r\n/g, "\n")
+		.replace(/\r/g, "");
 }
 
 export function textOutput(result: ToolResultLike | undefined): string {

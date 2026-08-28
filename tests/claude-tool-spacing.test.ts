@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { Theme } from "@earendil-works/pi-coding-agent";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import {
 	EDIT_DIFF_ADDED_BACKGROUND,
 	EDIT_DIFF_REMOVED_BACKGROUND,
@@ -47,6 +48,118 @@ test("native Claude tool renderer preserves one leading spacer line", () => {
 		assert.equal(lines[0], "");
 		assert.ok(lines[1]?.includes("● Read(src/a.ts)"));
 		assert.ok(lines[2]?.includes("⎿  Read 2 lines"));
+	} finally {
+		cleanup();
+	}
+});
+
+test("Bash lifecycle stays in the Claude renderer and sanitizes result payloads", () => {
+	const prototype = {
+		render(_width: number): string[] {
+			return ["ORIGINAL"];
+		},
+	};
+	const cleanup = installClaudeToolRenderer(() => theme, { prototype });
+	try {
+		const base = {
+			toolName: "bash",
+			args: { command: "echo one" },
+			cwd: "/repo",
+			expanded: false,
+			ui: { requestRender() {} },
+		};
+		const states = [
+			{ ...base, isPartial: true, executionStarted: false },
+			{
+				...base,
+				isPartial: true,
+				executionStarted: true,
+				result: { isError: false, content: [{ type: "text", text: "\x1b[34mrunning\x1b[0m" }] },
+			},
+			{
+				...base,
+				isPartial: false,
+				executionStarted: true,
+				result: {
+					isError: false,
+					content: [{ type: "text", text: "\x1b[34m$ echo one\x1b[0m\n\x1b[2J$ echo two" }],
+				},
+			},
+			{
+				...base,
+				isPartial: false,
+				executionStarted: true,
+				result: { isError: true, content: [{ type: "text", text: "\x1b[31mfailed\x1b[0m" }] },
+			},
+		];
+
+		for (const state of states) {
+			const lines = prototype.render.call(state, 80);
+			const plain = lines.map(stripAnsi).join("\n");
+			assert.doesNotMatch(plain, /ORIGINAL/);
+			assert.equal((plain.match(/Bash\(/g) ?? []).length, 1);
+			assert.match(plain, /⎿/);
+			assert.doesNotMatch(lines.join("\n"), /\x1b\[(?:2J|3[14]m)/);
+		}
+	} finally {
+		cleanup();
+	}
+});
+
+test("multiline Bash headings keep a two-column continuation gutter", () => {
+	const prototype = {
+		render(_width: number): string[] {
+			return ["ORIGINAL"];
+		},
+	};
+	const cleanup = installClaudeToolRenderer(() => theme, { prototype });
+	const render = (command: string, expanded: boolean, width: number) => {
+		const bash = {
+			toolName: "bash",
+			args: { command },
+			cwd: "/repo",
+			expanded,
+			isPartial: false,
+			executionStarted: true,
+			result: { isError: false, content: [{ type: "text", text: "Success" }] },
+			ui: { requestRender() {} },
+		};
+		return prototype.render.call(bash, width);
+	};
+
+	try {
+		const heredoc = [
+			"apply_patch <<'PATCH'",
+			"*** Begin Patch",
+			"*** Update File: src/example.ts",
+			"PATCH",
+		].join("\n");
+		const collapsed = render(heredoc, false, 80).map((line) => stripAnsi(line).trimEnd());
+		const collapsedResultIndex = collapsed.findIndex((line) => line.includes("⎿"));
+		assert.equal(collapsed[1], "● Bash(apply_patch <<'PATCH'");
+		assert.equal(collapsed[2], "  *** Begin Patch…)");
+		assert.equal(collapsedResultIndex, 3);
+
+		const expanded = render(heredoc, true, 80).map((line) => stripAnsi(line).trimEnd());
+		const expandedResultIndex = expanded.findIndex((line) => line.includes("⎿"));
+		const expandedHeading = expanded.slice(1, expandedResultIndex);
+		assert.equal(expandedHeading[0], "● Bash(apply_patch <<'PATCH'");
+		assert.deepEqual(expandedHeading.slice(1), [
+			"  *** Begin Patch",
+			"  *** Update File: src/example.ts",
+			"  PATCH)",
+		]);
+
+		const width = 24;
+		const narrow = render(`printf '%s' ${"value".repeat(40)}`, false, width);
+		const narrowPlain = narrow.map((line) => stripAnsi(line).trimEnd());
+		const narrowResultIndex = narrowPlain.findIndex((line) => line.includes("⎿"));
+		const narrowHeading = narrowPlain.slice(1, narrowResultIndex);
+		assert.equal((narrowHeading.join("\n").match(/Bash\(/g) ?? []).length, 1);
+		assert.ok(narrowHeading.length > 1);
+		assert.ok(narrowHeading.slice(1).every((line) => line.startsWith("  ")));
+		assert.ok(narrow.every((line) => visibleWidth(line) <= width));
+		assert.ok(narrowHeading.at(-1)?.endsWith("…)") ?? false);
 	} finally {
 		cleanup();
 	}

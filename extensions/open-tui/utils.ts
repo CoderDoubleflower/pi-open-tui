@@ -6,10 +6,68 @@ import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 export { truncateToWidth, visibleWidth };
 
 export function stripAnsi(text: string): string {
-	return text
-		.replace(/\x1b\[[0-9;]*m/g, "")
-		.replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "")
-		.replace(/\x1b_[^\x07]*\x07/g, "");
+	let clean = "";
+	for (let index = 0; index < text.length;) {
+		const code = text.charCodeAt(index);
+		if (code === 0x1b) {
+			const kind = text[index + 1];
+			if (kind === "[") {
+				index = consumeCsi(text, index + 2);
+				continue;
+			}
+			if (kind === "]" || kind === "P" || kind === "X" || kind === "^" || kind === "_") {
+				index = consumeControlString(text, index + 2);
+				continue;
+			}
+			index = consumeEscapeSequence(text, index + 1);
+			continue;
+		}
+		if (code === 0x9b) {
+			index = consumeCsi(text, index + 1);
+			continue;
+		}
+		if (code === 0x90 || code === 0x98 || code === 0x9d || code === 0x9e || code === 0x9f) {
+			index = consumeControlString(text, index + 1);
+			continue;
+		}
+		if (code >= 0x80 && code <= 0x9f) {
+			index++;
+			continue;
+		}
+		clean += text[index];
+		index++;
+	}
+	return clean;
+}
+
+function consumeCsi(text: string, index: number): number {
+	while (index < text.length) {
+		const code = text.charCodeAt(index++);
+		if (code >= 0x40 && code <= 0x7e) break;
+	}
+	return index;
+}
+
+function consumeControlString(text: string, index: number): number {
+	while (index < text.length) {
+		const code = text.charCodeAt(index);
+		if (code === 0x07 || code === 0x9c) return index + 1;
+		if (code === 0x1b && text[index + 1] === "\\") return index + 2;
+		index++;
+	}
+	return index;
+}
+
+function consumeEscapeSequence(text: string, index: number): number {
+	while (index < text.length) {
+		const code = text.charCodeAt(index);
+		if (code >= 0x20 && code <= 0x2f) {
+			index++;
+			continue;
+		}
+		return code >= 0x30 && code <= 0x7e ? index + 1 : index;
+	}
+	return index;
 }
 
 export function formatCwd(cwd: string): string {

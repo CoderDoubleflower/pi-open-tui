@@ -205,6 +205,71 @@ test("Bash queued, progress, and final result views stay distinct", () => {
 	);
 });
 
+test("Bash output strips terminal styling and controls in every result state", () => {
+	const coloredCommands = "\x1b[34m$ echo one\x1b[0m\n\x1b[34m$ echo two\x1b[0m";
+	const result = { content: [{ type: "text", text: coloredCommands }] };
+	assert.deepEqual(formatClaudeToolResult("bash", {}, result, "running"), [
+		"$ echo one",
+		"$ echo two",
+	]);
+	assert.deepEqual(formatClaudeToolResult("bash", {}, result, "success"), [
+		"$ echo one",
+		"$ echo two",
+	]);
+	assert.deepEqual(formatClaudeToolResult("bash", {}, result, "error", undefined, true), [
+		"$ echo one",
+		"$ echo two",
+	]);
+	assert.deepEqual(
+		formatClaudeToolResult(
+			"bash",
+			{},
+			{ content: [{ type: "text", text: "\x1b[34m(no output)\x1b[0m" }] },
+			"success",
+		),
+		["(No output)"],
+	);
+});
+
+test("Bash output removes terminal control families and normalizes redraw carriage returns", () => {
+	const controlled = [
+		"\x1b]0;fake-title\x07",
+		"\x1b[2Jvisible\rupdated\r\nnext",
+		"\x1bPignored dcs\x1b\\after-dcs",
+		"\x9b31mc1-color\x9b0m\x9dignored title\x9cafter-c1",
+	].join("\n");
+	assert.deepEqual(
+		formatClaudeToolResult(
+			"bash",
+			{},
+			{ content: [{ type: "text", text: controlled }] },
+			"success",
+			undefined,
+			true,
+		),
+		["", "visibleupdated", "next", "after-dcs", "c1-colorafter-c1"],
+	);
+	assert.equal(stripAnsi("before\x1b]unterminated"), "before");
+	assert.equal(stripAnsi("plain\t中文\nnext"), "plain\t中文\nnext");
+	assert.equal(stripAnsi("before\x1b\nnext"), "before\nnext");
+});
+
+test("Bash collapsed output counts sanitized visible lines", () => {
+	const output = Array.from(
+		{ length: 5 },
+		(_, index) => `\x1b[3${index}mline ${index + 1}\x1b[0m`,
+	).join("\n");
+	assert.deepEqual(
+		formatClaudeToolResult(
+			"bash",
+			{},
+			{ content: [{ type: "text", text: output }] },
+			"success",
+		),
+		["line 1", "line 2", "line 3", "… +2 lines (ctrl+o to expand)"],
+	);
+});
+
 test("Read and Write cover Claude's edge-case messages", () => {
 	assert.deepEqual(
 		formatClaudeToolResult(

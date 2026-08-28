@@ -1,5 +1,5 @@
 import { ToolExecutionComponent, type Theme } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
+import { Text, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import {
 	formatClaudeMcpToolResult,
 	formatClaudeMcpToolUse,
@@ -39,6 +39,7 @@ const DIM = "\x1b[2m";
 const DIM_RESET = "\x1b[22m";
 const BACKGROUND_RESET = "\x1b[49m";
 const EDIT_DIFF_INDENT = "     ";
+const TOOL_HEADING_CONTINUATION = "  ";
 export const EDIT_DIFF_ADDED_BACKGROUND = "\x1b[48;5;22m";
 export const EDIT_DIFF_REMOVED_BACKGROUND = "\x1b[48;5;52m";
 const NATIVE_TOOLS = new Set(["read", "write", "edit", "bash", "grep", "find", "ls"]);
@@ -163,6 +164,33 @@ function responsePrefix(): string {
 	return `${DIM}  ${RESPONSE}  ${DIM_RESET}`;
 }
 
+function padLine(line: string, width: number): string {
+	return line + " ".repeat(Math.max(0, width - visibleWidth(line)));
+}
+
+function renderToolHeading(title: string, detail: string, width: number): string[] {
+	const safeWidth = Math.max(1, width);
+	if (!detail) return new Text(title, 0, 0).render(safeWidth);
+
+	const indentWidth = Math.min(TOOL_HEADING_CONTINUATION.length, Math.max(0, safeWidth - 1));
+	const indent = TOOL_HEADING_CONTINUATION.slice(0, indentWidth);
+	const contentWidth = Math.max(1, safeWidth - indentWidth);
+	const detailLines = detail.replaceAll("\t", "   ").split("\n");
+	const logicalLines = [`${title}(${detailLines[0] ?? ""}`, ...detailLines.slice(1)];
+	logicalLines[logicalLines.length - 1] = `${logicalLines.at(-1) ?? ""})`;
+
+	const rendered: string[] = [];
+	for (let lineIndex = 0; lineIndex < logicalLines.length; lineIndex++) {
+		const wrapped = wrapTextWithAnsi(logicalLines[lineIndex] ?? "", contentWidth);
+		const fragments = wrapped.length > 0 ? wrapped : [""];
+		for (let fragmentIndex = 0; fragmentIndex < fragments.length; fragmentIndex++) {
+			const continuation = lineIndex > 0 || fragmentIndex > 0;
+			rendered.push(padLine(`${continuation ? indent : ""}${fragments[fragmentIndex] ?? ""}`, safeWidth));
+		}
+	}
+	return rendered;
+}
+
 function boldSummaryCounts(toolName: string, index: number, line: string, theme: Theme): string {
 	if (index !== 0) return line;
 	const lower = toolName.toLowerCase();
@@ -258,8 +286,8 @@ function renderClaudeTool(
 	const use = mcpIdentity
 		? formatClaudeMcpToolUse(mcpIdentity, tool.args, expanded)
 		: formatClaudeToolUse(toolName, tool.args, cwd, expanded);
-	const detail = use.detail ? `(${use.detail})` : "";
-	const first = `${statusDot(status, blink, theme)} ${theme.bold(use.name)}${detail}`;
+	const title = `${statusDot(status, blink, theme)} ${theme.bold(use.name)}`;
+	const headingLines = renderToolHeading(title, use.detail, width);
 	const rawResultLines = mcpIdentity
 		? formatClaudeMcpToolResult(tool.result, status, expanded)
 		: formatClaudeToolResult(toolName, tool.args, tool.result, status, cwd, expanded);
@@ -274,17 +302,21 @@ function renderClaudeTool(
 	) {
 		return [
 			"",
-			...new Text(first, 0, 0).render(width),
+			...headingLines,
 			...renderEditResultLines(rawResultLines, resultLines, width),
 		];
 	}
 
-	const body = resultLines.length === 0
-		? first
-		: [first, `${responsePrefix()}${resultLines[0]}`, ...resultLines.slice(1).map((line) => `     ${line}`)].join("\n");
+	const resultBody = resultLines.length === 0
+		? []
+		: new Text(
+			[`${responsePrefix()}${resultLines[0]}`, ...resultLines.slice(1).map((line) => `     ${line}`)].join("\n"),
+			0,
+			0,
+		).render(width);
 	// ToolExecutionComponent normally renders a leading Spacer(1). Replacing
 	// its render method bypasses that child, so restore Claude's top margin here.
-	return ["", ...new Text(body, 0, 0).render(width)];
+	return ["", ...headingLines, ...resultBody];
 }
 
 export function installClaudeToolRenderer(

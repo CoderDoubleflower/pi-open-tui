@@ -20,6 +20,7 @@ import {
 	visibleContentLines,
 	WRITE_PREVIEW_LINES,
 } from "./claude-tool-renderer-shared.ts";
+import { stripAnsi } from "./utils.ts";
 
 function imageSummary(result: ToolResultLike | undefined): string | undefined {
 	const block = result?.content?.find((item) => item.type === "image");
@@ -131,12 +132,12 @@ function isNoOutput(value: string): boolean {
 	return !normalized || normalized === "(no output)" || normalized === "no output";
 }
 
-function stripAnsi(value: string): string {
-	return value.replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g, "");
+function bashDisplayOutput(result: ToolResultLike | undefined, structured = true): string {
+	return stripAnsi(structured ? structuredTextOutput(result) : textOutput(result));
 }
 
 function bashProgressResult(result: ToolResultLike | undefined, expanded: boolean): string[] {
-	const output = stripAnsi(structuredTextOutput(result).trim());
+	const output = bashDisplayOutput(result).trim();
 	if (isNoOutput(output)) return ["Running…"];
 	if (expanded) return output.split("\n");
 	const lines = output.split("\n").filter((line) => line.length > 0);
@@ -163,7 +164,7 @@ function bashSuccessResult(result: ToolResultLike | undefined, expanded: boolean
 		return ["[Image data detected and sent to Claude]"];
 	}
 	const details = detailsOf(result);
-	const output = structuredTextOutput(result);
+	const output = bashDisplayOutput(result);
 	if (isNoOutput(output)) {
 		const returnCodeInterpretation = asString(details.returnCodeInterpretation);
 		if (returnCodeInterpretation) return [returnCodeInterpretation];
@@ -184,7 +185,7 @@ function isFileNotFoundError(value: string): boolean {
 }
 
 function errorResult(toolName: string, result: ToolResultLike | undefined, expanded: boolean): string[] {
-	const raw = textOutput(result).trim();
+	const raw = (toolName === "bash" ? bashDisplayOutput(result, false) : textOutput(result)).trim();
 	if (expanded) return raw ? raw.split("\n") : ["Tool failed"];
 	if (toolName === "bash") return raw ? collapsedBashResult(raw) : ["Tool failed"];
 	if (isFileNotFoundError(raw)) return ["File not found"];
