@@ -308,7 +308,9 @@ export function registerOpenTui(pi: ExtensionAPI, spinnerDependencies?: SpinnerD
 		turnTelemetry.handle(event);
 		if (sessionLifecycle.isCurrent()) spinnerInstallation?.controller.turnStart();
 	});
-	pi.on("message_start", (event) => turnTelemetry.handle(event));
+	pi.on("message_start", (event) => {
+		turnTelemetry.handle(event);
+	});
 	pi.on("message_update", (event) => {
 		turnTelemetry.handle(event);
 		if (!sessionLifecycle.isCurrent()) return;
@@ -321,7 +323,9 @@ export function registerOpenTui(pi: ExtensionAPI, spinnerDependencies?: SpinnerD
 		turnTelemetry.handle(event);
 		if (sessionLifecycle.isCurrent()) spinnerInstallation?.controller.toolExecutionStart(event.toolCallId);
 	});
-	pi.on("turn_end", (event) => turnTelemetry.handle(event));
+	pi.on("turn_end", (event) => {
+		turnTelemetry.handle(event);
+	});
 	pi.on("agent_settled", (event, ctx) => {
 		const telemetry = turnTelemetry.handle(event);
 		if (telemetry && config.enabled && config.telemetry.enabled && isTuiContext(ctx)) {

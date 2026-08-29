@@ -151,7 +151,7 @@ export const DEFAULT_CONFIG: OpenTuiConfig = {
 	telemetry: {
 		enabled: true,
 		tps: true,
-		tft: true,
+		ttft: true,
 		duration: true,
 		tokens: true,
 		stalls: true,
