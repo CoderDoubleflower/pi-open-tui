@@ -15,15 +15,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Install dependencies and refresh lockfile
+      - name: Install dependencies
         run: npm install --ignore-scripts
       - name: Typecheck
         run: npm run typecheck
       - name: Test
         run: npm test
-      - name: Upload generated lockfile
-        uses: actions/upload-artifact@v4
-        with:
-          name: generated-package-lock
-          path: package-lock.json
-          if-no-files-found: error
