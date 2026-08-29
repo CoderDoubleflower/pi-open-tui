@@ -1,13 +1,11 @@
+import { DEFAULT_TOOL_RENDERING_CONFIG, type ToolRenderingConfig } from "./config.ts";
 import {
+	applyOutputMode,
 	asNumber,
 	asString,
-	BASH_PROGRESS_LINES,
-	BASH_RESULT_LINES,
 	detailsOf,
 	displayPath,
 	encodedByteLength,
-	expandHint,
-	EXPAND_HINT,
 	formatFileSize,
 	isObject,
 	logicalLineCount,
@@ -18,7 +16,6 @@ import {
 	type ClaudeToolStatus,
 	type ToolResultLike,
 	visibleContentLines,
-	WRITE_PREVIEW_LINES,
 } from "./claude-tool-renderer-shared.ts";
 import { stripAnsi } from "./utils.ts";
 
@@ -29,48 +26,46 @@ function imageSummary(result: ToolResultLike | undefined): string | undefined {
 	return bytes > 0 ? `Read image (${formatFileSize(bytes)})` : "Read image";
 }
 
-function readResult(result: ToolResultLike | undefined): string[] {
+function readResult(
+	result: ToolResultLike | undefined,
+	expanded: boolean,
+	config: ToolRenderingConfig,
+): string[] {
 	const details = detailsOf(result);
-	if (
-		details.type === "file_unchanged" ||
-		details.fileUnchanged === true ||
-		details.unchanged === true
-	) {
+	if (details.type === "file_unchanged" || details.fileUnchanged === true || details.unchanged === true) {
 		return ["Unchanged since last read"];
 	}
-
 	const image = imageSummary(result);
 	if (image) return [image];
-
 	const pdfBlock = result?.content?.find((item) => item.mimeType === "application/pdf");
 	if (pdfBlock) {
 		const bytes = encodedByteLength(pdfBlock.data);
 		return [bytes > 0 ? `Read PDF (${formatFileSize(bytes)})` : "Read PDF"];
 	}
-
 	const numCells = asNumber(details.numCells ?? details.cells);
 	if (numCells !== undefined) {
 		return [numCells === 0 ? "No cells found in notebook" : `Read ${numCells} ${plural(numCells, "cell")}`];
 	}
-
+	const output = textOutputRaw(result);
+	const contentLines = visibleContentLines(output);
 	const truncation = isObject(details.truncation) ? details.truncation : undefined;
 	const outputLines = truncation ? asNumber(truncation.outputLines) : undefined;
-	const count = outputLines ?? logicalLineCount(textOutputRaw(result));
-	return [`Read ${count} ${plural(count, "line")}`];
+	const count = outputLines ?? logicalLineCount(output);
+	return applyOutputMode(
+		`Read ${count} ${plural(count, "line")}`,
+		contentLines,
+		config.readOutputMode,
+		expanded,
+		config.previewLines,
+		config.expandedPreviewMaxLines,
+	);
 }
 
-function writeResult(args: Record<string, unknown>, cwd: string | undefined, expanded: boolean): string[] {
+function writeResult(args: Record<string, unknown>, cwd: string | undefined): string[] {
 	const path = displayPath(args.file_path ?? args.path, cwd);
 	const content = asString(args.content) ?? "";
 	const count = logicalLineCount(content);
-	const contentLines = content ? visibleContentLines(content) : ["(No content)"];
-	const preview = expanded ? contentLines : contentLines.slice(0, WRITE_PREVIEW_LINES);
-	const hidden = Math.max(0, count - WRITE_PREVIEW_LINES);
-	const result = [`Wrote ${count} lines to ${path || "file"}`, ...preview];
-	if (!expanded && hidden > 0) {
-		result.push(`… +${hidden} ${plural(hidden, "line")} ${EXPAND_HINT}`);
-	}
-	return result;
+	return [`Wrote ${count} ${plural(count, "line")} to ${path || "file"}`];
 }
 
 function editSummary(diff: string): string {
@@ -90,41 +85,30 @@ function editSummary(diff: string): string {
 
 function editResult(result: ToolResultLike | undefined): string[] {
 	const diff = asString(detailsOf(result).diff);
-	if (!diff) return ["Updated file"];
-	const lines = diff.replace(/\r\n?/g, "\n").trimEnd().split("\n");
-	return [editSummary(diff), ...lines];
+	return [diff ? editSummary(diff) : "Updated file"];
 }
 
 function searchContentLines(result: ToolResultLike | undefined, emptySentinels: string[]): string[] {
 	const output = structuredTextOutput(result).trim();
-	if (!output || emptySentinels.some((sentinel) => output.toLowerCase() === sentinel.toLowerCase())) {
-		return [];
-	}
+	if (!output || emptySentinels.some((sentinel) => output.toLowerCase() === sentinel.toLowerCase())) return [];
 	return output.split("\n");
 }
 
-function grepResult(result: ToolResultLike | undefined, expanded: boolean): string[] {
-	const content = searchContentLines(result, ["No matches found", "No matches"]);
-	const matches = content.filter((line) => /:\d+:/.test(line));
-	const count = matches.length > 0 ? matches.length : content.filter((line) => line.trim().length > 0).length;
-	const summary = expandHint(`Found ${count} ${plural(count, "line")}`, count, expanded);
-	return expanded && count > 0 ? [summary, ...content] : [summary];
-}
-
-function findResult(result: ToolResultLike | undefined, expanded: boolean): string[] {
-	const content = searchContentLines(result, ["No files found matching pattern"])
-		.filter((line) => line.trim().length > 0);
+function searchResult(
+	noun: string,
+	content: string[],
+	expanded: boolean,
+	config: ToolRenderingConfig,
+): string[] {
 	const count = content.length;
-	const summary = expandHint(`Found ${count} ${plural(count, "file")}`, count, expanded);
-	return expanded && count > 0 ? [summary, ...content] : [summary];
-}
-
-function lsResult(result: ToolResultLike | undefined, expanded: boolean): string[] {
-	const content = searchContentLines(result, ["(empty directory)"])
-		.filter((line) => line.trim().length > 0);
-	const count = content.length;
-	const summary = expandHint(`Found ${count} ${plural(count, "entry", "entries")}`, count, expanded);
-	return expanded && count > 0 ? [summary, ...content] : [summary];
+	return applyOutputMode(
+		`Found ${count} ${plural(count, noun, noun === "entry" ? "entries" : `${noun}s`)}`,
+		content,
+		config.searchOutputMode,
+		expanded,
+		config.previewLines,
+		config.expandedPreviewMaxLines,
+	);
 }
 
 function isNoOutput(value: string): boolean {
@@ -136,58 +120,59 @@ function bashDisplayOutput(result: ToolResultLike | undefined, structured = true
 	return stripAnsi(structured ? structuredTextOutput(result) : textOutput(result));
 }
 
-function bashProgressResult(result: ToolResultLike | undefined, expanded: boolean): string[] {
+function bashProgressResult(
+	result: ToolResultLike | undefined,
+	expanded: boolean,
+	config: ToolRenderingConfig,
+): string[] {
+	if (!config.livePreview) return ["Running…"];
 	const output = bashDisplayOutput(result).trim();
 	if (isNoOutput(output)) return ["Running…"];
-	if (expanded) return output.split("\n");
 	const lines = output.split("\n").filter((line) => line.length > 0);
-	const visible = lines.slice(-BASH_PROGRESS_LINES);
+	if (expanded) return lines.slice(-config.expandedPreviewMaxLines);
+	const visible = lines.slice(-config.livePreviewLines);
 	const truncation = detailsOf(result).truncation;
 	const totalLines = isObject(truncation) ? asNumber(truncation.totalLines) : undefined;
 	const totalBytes = isObject(truncation) ? asNumber(truncation.totalBytes) : undefined;
 	const hidden = Math.max(0, (totalLines ?? lines.length) - visible.length);
-	if (totalBytes !== undefined && totalLines !== undefined) {
-		return [...visible, `~${totalLines} lines ${formatFileSize(totalBytes)}`];
-	}
+	if (totalBytes !== undefined && totalLines !== undefined) return [...visible, `~${totalLines} lines ${formatFileSize(totalBytes)}`];
 	return hidden > 0 ? [...visible, `+${hidden} lines`] : visible;
 }
 
-function collapsedBashResult(output: string): string[] {
-	const lines = output.trimEnd().split("\n");
-	if (lines.length <= BASH_RESULT_LINES + 1) return lines;
-	const hidden = lines.length - BASH_RESULT_LINES;
-	return [...lines.slice(0, BASH_RESULT_LINES), `… +${hidden} lines ${EXPAND_HINT}`];
-}
-
-function bashSuccessResult(result: ToolResultLike | undefined, expanded: boolean): string[] {
-	if (result?.content?.some((block) => block.type === "image")) {
-		return ["[Image data detected and sent to Claude]"];
-	}
+function bashSuccessResult(
+	result: ToolResultLike | undefined,
+	expanded: boolean,
+	config: ToolRenderingConfig,
+): string[] {
+	if (result?.content?.some((block) => block.type === "image")) return ["[Image data detected and sent to Claude]"];
 	const details = detailsOf(result);
 	const output = bashDisplayOutput(result);
 	if (isNoOutput(output)) {
-		const returnCodeInterpretation = asString(details.returnCodeInterpretation);
-		if (returnCodeInterpretation) return [returnCodeInterpretation];
+		const interpretation = asString(details.returnCodeInterpretation);
+		if (interpretation) return [interpretation];
 		if (details.backgroundTaskId) return ["Running in the background (↓ to manage)"];
 		return [details.noOutputExpected === true ? "Done" : "(No output)"];
 	}
-	return expanded ? output.trimEnd().split("\n") : collapsedBashResult(output);
+	const contentLines = output.trimEnd().split("\n");
+	return applyOutputMode(
+		`Completed with ${contentLines.length} ${plural(contentLines.length, "line")}`,
+		contentLines,
+		config.bashOutputMode,
+		expanded,
+		config.previewLines,
+		config.expandedPreviewMaxLines,
+	);
 }
 
 function isFileNotFoundError(value: string): boolean {
 	const lower = value.toLowerCase();
-	return (
-		lower.includes("enoent") ||
-		lower.includes("no such file") ||
-		lower.includes("file not found") ||
-		lower.includes("path not found")
-	);
+	return lower.includes("enoent") || lower.includes("no such file") || lower.includes("file not found") || lower.includes("path not found");
 }
 
-function errorResult(toolName: string, result: ToolResultLike | undefined, expanded: boolean): string[] {
+function errorResult(toolName: string, result: ToolResultLike | undefined, expanded: boolean, config: ToolRenderingConfig): string[] {
 	const raw = (toolName === "bash" ? bashDisplayOutput(result, false) : textOutput(result)).trim();
-	if (expanded) return raw ? raw.split("\n") : ["Tool failed"];
-	if (toolName === "bash") return raw ? collapsedBashResult(raw) : ["Tool failed"];
+	if (expanded) return raw ? raw.split("\n").slice(0, config.expandedPreviewMaxLines) : ["Tool failed"];
+	if (toolName === "bash") return raw ? raw.split("\n").slice(0, config.previewLines) : ["Tool failed"];
 	if (isFileNotFoundError(raw)) return ["File not found"];
 	if (toolName === "read") return ["Error reading file"];
 	if (toolName === "write") return ["Error writing file"];
@@ -207,21 +192,21 @@ export function formatClaudeToolResult(
 	status: ClaudeToolStatus,
 	cwd?: string,
 	expanded = false,
+	config: ToolRenderingConfig = DEFAULT_TOOL_RENDERING_CONFIG,
 ): string[] {
 	const args = isObject(argsValue) ? argsValue : {};
 	const result = isObject(resultValue) ? resultValue as ToolResultLike : undefined;
 	const lower = toolName.toLowerCase();
-
 	if (status === "pending") return lower === "bash" ? ["Waiting…"] : [];
-	if (status === "error") return errorResult(lower, result, expanded);
-	if (status === "running") return lower === "bash" ? bashProgressResult(result, expanded) : [];
-	if (lower === "bash") return bashSuccessResult(result, expanded);
-	if (lower === "read") return readResult(result);
-	if (lower === "write") return writeResult(args, cwd, expanded);
+	if (status === "error") return errorResult(lower, result, expanded, config);
+	if (status === "running") return lower === "bash" ? bashProgressResult(result, expanded, config) : [];
+	if (lower === "bash") return bashSuccessResult(result, expanded, config);
+	if (lower === "read") return readResult(result, expanded, config);
+	if (lower === "write") return writeResult(args, cwd);
 	if (lower === "edit") return editResult(result);
-	if (lower === "grep") return grepResult(result, expanded);
-	if (lower === "find") return findResult(result, expanded);
-	if (lower === "ls") return lsResult(result, expanded);
+	if (lower === "grep") return searchResult("line", searchContentLines(result, ["No matches found", "No matches"]), expanded, config);
+	if (lower === "find") return searchResult("file", searchContentLines(result, ["No files found matching pattern"]).filter(Boolean), expanded, config);
+	if (lower === "ls") return searchResult("entry", searchContentLines(result, ["(empty directory)"]).filter(Boolean), expanded, config);
 	const output = textOutput(result);
-	return output ? output.split("\n") : [];
+	return output ? output.split("\n").slice(0, expanded ? config.expandedPreviewMaxLines : config.previewLines) : [];
 }

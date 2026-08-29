@@ -1,11 +1,11 @@
 {
   "name": "pi-open-tui",
   "version": "0.2.12",
-  "description": "A polished TUI for Pi coding agent: animated logo header, Starship-style footer, full-width prompt editor, and prompt-box user messages. Combines the best of pi-haiku, pi-claude-code-tui, and pi-zentui.",
+  "description": "A polished TUI for Pi coding agent: animated logo header, Starship-style footer, full-width prompt editor, and Claude-style tool rendering.",
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/OldSuns/pi-open-tui.git"
+    "url": "git+https://github.com/CoderDoubleflower/pi-open-tui.git"
   },
   "keywords": [
     "pi-package",
@@ -14,7 +14,10 @@
     "pi-extension",
     "tui",
     "starship",
-    "theme"
+    "theme",
+    "claude-code",
+    "tool-renderer",
+    "diff"
   ],
   "license": "MIT",
   "files": [
@@ -26,8 +29,12 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node --test tests/clear-command.test.ts tests/settings-command.test.ts tests/fullscreen-scroll.test.ts tests/footer.test.ts tests/state.test.ts tests/footer-script.test.ts tests/editor.test.ts tests/user-message.test.ts tests/output-prefix.test.ts tests/claude-tool-spacing.test.ts tests/markdown.test.ts tests/telemetry.test.ts tests/theme.test.ts tests/spinner-config.test.ts tests/spinner-content.test.ts tests/spinner-events.test.ts tests/spinner-suffix.test.ts tests/spinner-state.test.ts tests/spinner-render.test.ts tests/spinner-lifecycle.test.ts tests/native-status-bridge.test.ts tests/spinner-native-performance.test.ts tests/spinner-idle.test.ts tests/todo-spinner-integration.test.ts tests/compaction-lifecycle.test.ts",
+    "test": "node --test tests/clear-command.test.ts tests/settings-command.test.ts tests/fullscreen-scroll.test.ts tests/footer.test.ts tests/state.test.ts tests/footer-script.test.ts tests/editor.test.ts tests/user-message.test.ts tests/output-prefix.test.ts tests/claude-tool-spacing.test.ts tests/claude-diff.test.ts tests/claude-tool-group.test.ts tests/header.test.ts tests/markdown.test.ts tests/telemetry.test.ts tests/theme.test.ts tests/spinner-config.test.ts tests/spinner-content.test.ts tests/spinner-events.test.ts tests/spinner-suffix.test.ts tests/spinner-state.test.ts tests/spinner-render.test.ts tests/spinner-lifecycle.test.ts tests/native-status-bridge.test.ts tests/spinner-native-performance.test.ts tests/spinner-idle.test.ts tests/todo-spinner-integration.test.ts tests/compaction-lifecycle.test.ts",
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@shikijs/cli": "^4.0.2",
+    "diff": "^9.0.0"
   },
   "pi": {
     "extensions": [
@@ -36,7 +43,7 @@
     "themes": [
       "./themes/claude-theme.json"
     ],
-    "image": "https://raw.githubusercontent.com/OldSuns/pi-open-tui/main/assets/preview_dashboard_1.png"
+    "image": "https://raw.githubusercontent.com/CoderDoubleflower/pi-open-tui/main/assets/preview_dashboard_1.png"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.84.3 <0.85.0",

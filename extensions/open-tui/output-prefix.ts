@@ -2,6 +2,7 @@ import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { AssistantMessageComponent, type Theme } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
 import { visibleWidth } from "@earendil-works/pi-tui";
+import type { ToolRenderingConfig } from "./config.ts";
 import {
 	ClaudeToolBlinkController,
 	installClaudeToolRenderer,
@@ -34,6 +35,7 @@ export interface OutputPrefixOptions {
 	blink?: ClaudeToolBlinkController;
 	assistantPrototype?: AssistantPrototype;
 	toolPrototype?: ToolPrototype;
+	getToolConfig?: () => ToolRenderingConfig;
 }
 
 function rgb(r: number, g: number, b: number, text: string): string {
@@ -75,14 +77,10 @@ export class PrefixComponent implements Component {
 
 	render(width: number): string[] {
 		if (width <= this.slotWidth) return this.child.render(width);
-
 		const contentWidth = width - this.slotWidth;
 		const lines = this.child.render(contentWidth);
 		const firstTextLine = lines.findIndex(hasVisibleText);
-		if (firstTextLine === -1) {
-			return this.child.render(width);
-		}
-
+		if (firstTextLine === -1) return this.child.render(width);
 		return lines.map((line, index) => {
 			let slot = " ".repeat(this.slotWidth);
 			if (index === firstTextLine) {
@@ -112,7 +110,6 @@ function assistantBlockKinds(message: AssistantMessage, hideThinkingBlock: boole
 			continue;
 		}
 		if (content.type !== "thinking") continue;
-
 		let hasVisibleThinking = false;
 		for (; i < message.content.length; i++) {
 			const thinking = message.content[i]!;
@@ -139,22 +136,17 @@ function renderAssistantWithPrefixes(
 ): string[] {
 	if (!isMutableContainer(component.contentContainer)) return renderOriginal(width);
 	if (typeof component.hideThinkingBlock !== "boolean") return renderOriginal(width);
-
 	const kinds = assistantBlockKinds(message, component.hideThinkingBlock);
 	const markdownChildren = component.contentContainer.children.filter(isMarkdownComponent);
 	if (markdownChildren.length !== kinds.length) return renderOriginal(width);
-
 	const originalChildren = component.contentContainer.children;
 	let markdownIndex = 0;
 	component.contentContainer.children = component.contentContainer.children.map((child) => {
 		if (!isMarkdownComponent(child)) return child;
 		const kind = kinds[markdownIndex++];
-		if (kind === "thinking") {
-			return new PrefixComponent(child, () => thinkingPrefix(getTheme));
-		}
+		if (kind === "thinking") return new PrefixComponent(child, () => thinkingPrefix(getTheme));
 		return new PrefixComponent(child, () => rgb(255, 255, 255, ASSISTANT_DOT));
 	});
-
 	try {
 		return renderOriginal(width);
 	} finally {
@@ -169,9 +161,7 @@ export function installAssistantPrefixes(
 	const previousRender = prototype.render;
 	const prefixedRender = function (this: AssistantInternals, width: number): string[] {
 		const renderOriginal = (renderWidth: number) => previousRender.call(this, renderWidth);
-		if (!this.lastMessage || typeof this.lastMessage !== "object") {
-			return renderOriginal(width);
-		}
+		if (!this.lastMessage || typeof this.lastMessage !== "object") return renderOriginal(width);
 		try {
 			return renderAssistantWithPrefixes(
 				this,
@@ -184,7 +174,6 @@ export function installAssistantPrefixes(
 			return renderOriginal(width);
 		}
 	};
-
 	prototype.render = prefixedRender;
 	return () => {
 		if (prototype.render === prefixedRender) prototype.render = previousRender;
@@ -199,6 +188,7 @@ export function installOutputPrefixes(
 	const cleanupTools = installClaudeToolRenderer(getTheme, {
 		blink: options.blink,
 		prototype: options.toolPrototype,
+		getConfig: options.getToolConfig,
 	});
 	let cleaned = false;
 	return () => {
