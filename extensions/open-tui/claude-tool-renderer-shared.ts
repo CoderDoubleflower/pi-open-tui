@@ -121,7 +121,9 @@ export function applyOutputMode(
 	const max = expanded ? expandedMaxLines : previewLines;
 	const shown = contentLines.slice(0, max);
 	const hidden = Math.max(0, contentLines.length - shown.length);
-	const result = [summary, ...shown];
+	// Preview mode shows the actual payload, matching Pi's historical formatter
+	// contract and avoiding an extra synthetic summary row before MCP/OpenAI data.
+	const result = [...shown];
 	if (hidden > 0) {
 		result.push(`… +${hidden} ${plural(hidden, "line")} ${expanded ? "(output capped)" : EXPAND_HINT}`);
 	}
