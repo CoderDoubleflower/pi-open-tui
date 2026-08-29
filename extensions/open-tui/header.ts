@@ -15,6 +15,7 @@ import {
 } from "./utils.ts";
 
 const LOGO_CELL = "███";
+export const HEADER_LOGO_FRAME_INTERVAL_MS = 80;
 
 type LogoColor = "panel" | "cyan" | "red" | "green" | "orange" | "white" | "flash" | "brand";
 type LogoFrame = { phase: number; active: "left" | "top" | "right" | "none"; ax: number; ay: number; flash: boolean; white: boolean };
@@ -25,15 +26,19 @@ const LOGO_FRAMES: LogoFrame[] = [
 	...Array.from({ length: 5 }, (_, ay) => ({ phase: 2, active: "right" as const, ax: 5, ay, flash: false, white: false })),
 	{ phase: 3, active: "none", ax: 0, ay: 0, flash: false, white: false },
 	{ phase: 3, active: "none", ax: 0, ay: 0, flash: true, white: false },
-	{ phase: 3, active: "none", ax: 0, ay: 0, flash: false, white: false },
-	{ phase: 3, active: "none", ax: 0, ay: 0, flash: true, white: false },
-	{ phase: 4, active: "none", ax: 0, ay: 0, flash: false, white: false },
-	{ phase: 5, active: "none", ax: 0, ay: 0, flash: false, white: false },
-	{ phase: 5, active: "none", ax: 0, ay: 0, flash: false, white: true },
-	{ phase: 5, active: "none", ax: 0, ay: 0, flash: false, white: false },
 	{ phase: 5, active: "none", ax: 0, ay: 0, flash: false, white: true },
 	{ phase: 6, active: "none", ax: 0, ay: 0, flash: false, white: false },
 ];
+
+export interface HeaderScheduler {
+	setInterval(callback: () => void, delayMs: number): unknown;
+	clearInterval(handle: unknown): void;
+}
+
+const defaultScheduler: HeaderScheduler = {
+	setInterval: (callback, delayMs) => setInterval(callback, delayMs),
+	clearInterval: (handle) => clearInterval(handle as ReturnType<typeof setInterval>),
+};
 
 function hasCell(y: number, x: number, cells: string): boolean {
 	return cells.split(" ").includes(`${y},${x}`);
@@ -51,7 +56,6 @@ function logoCellColor(frame: LogoFrame, y: number, x: number): LogoColor {
 		return hasCell(y, x, "3,2 3,3 3,4 4,2 4,4 5,2 5,3 5,5 6,2 6,5") ? "white" : "panel";
 	}
 	if (frame.flash && y === 6 && x >= 1 && x <= 6) return "flash";
-
 	switch (frame.active) {
 		case "left":
 			if (hasPiece(y, x, frame.ay, frame.ax, "0,0 1,0 1,1 2,0")) return "red";
@@ -63,7 +67,6 @@ function logoCellColor(frame: LogoFrame, y: number, x: number): LogoColor {
 			if (hasPiece(y, x, frame.ay, frame.ax, "0,0 1,0 2,0 2,1")) return "green";
 			break;
 	}
-
 	if (frame.phase === 6) {
 		return hasCell(y, x, "3,2 3,3 3,4 4,4 4,2 5,2 5,3 5,5 6,2 6,5") ? "brand" : "panel";
 	}
@@ -92,7 +95,6 @@ function rgbCell(r: number, g: number, b: number): string {
 
 function colorCell(color: LogoColor, paintBrand: (text: string) => string): string {
 	switch (color) {
-		// Claude Code Dark Theme subagent palette.
 		case "cyan": return rgbCell(8, 145, 178);
 		case "red": return rgbCell(220, 38, 38);
 		case "green": return rgbCell(22, 163, 74);
@@ -112,7 +114,6 @@ function renderLogo(frameIndex: number, paintBrand: (text: string) => string): s
 		for (let x = 1; x <= 8; x++) row.push(logoCellColor(frame, y, x));
 		grid.push(row);
 	}
-
 	let minX = 7;
 	let maxX = 0;
 	for (const row of grid) {
@@ -124,7 +125,6 @@ function renderLogo(frameIndex: number, paintBrand: (text: string) => string): s
 		});
 	}
 	if (maxX < minX) { minX = 0; maxX = 7; }
-
 	return grid.map((row) => {
 		let line = "";
 		for (let x = minX; x <= maxX; x++) line += colorCell(row[x]!, paintBrand);
@@ -132,18 +132,11 @@ function renderLogo(frameIndex: number, paintBrand: (text: string) => string): s
 	});
 }
 
-function borderLine(
-	left: string,
-	label: string,
-	right: string,
-	width: number,
-	paint: (text: string) => string,
-): string {
+function borderLine(left: string, label: string, right: string, width: number, paint: (text: string) => string): string {
 	if (width <= 1) return "";
 	if (width < 8 || label.length === 0) {
 		return paint(truncateToWidth(left + "─".repeat(Math.max(0, width - 2)) + right, width, ""));
 	}
-
 	const before = "─── ";
 	const after = " ─────";
 	const fixedWidth = visibleWidth(before) + visibleWidth(label) + visibleWidth(after);
@@ -156,30 +149,53 @@ function boxedLine(content: string, width: number, paint: (text: string) => stri
 	return `${paint("│")}${padRight(content, width - 2)}${paint("│")}`;
 }
 
-function twoColumn(
-	left: string,
-	right: string,
-	leftWidth: number,
-	rightWidth: number,
-	paint: (text: string) => string,
-): string {
+function twoColumn(left: string, right: string, leftWidth: number, rightWidth: number, paint: (text: string) => string): string {
 	return `${padRight(left, leftWidth)} ${paint("│")} ${padRight(right, rightWidth, "…")}`;
 }
 
 export class OpenTuiHeader implements Component {
 	private readonly pi: ExtensionAPI;
 	private readonly ctx: ExtensionContext;
-	private readonly frame = LOGO_FRAMES.length - 1;
+	private readonly tui: TUI;
+	private readonly scheduler: HeaderScheduler;
+	private frame = 0;
+	private animationTimer: unknown;
+	private disposed = false;
 	private readonly tipCommands: string[];
 
-	constructor(pi: ExtensionAPI, ctx: ExtensionContext, _tui: TUI) {
+	constructor(
+		pi: ExtensionAPI,
+		ctx: ExtensionContext,
+		tui: TUI,
+		scheduler: HeaderScheduler = defaultScheduler,
+	) {
 		this.pi = pi;
 		this.ctx = ctx;
+		this.tui = tui;
+		this.scheduler = scheduler;
 		const pool = collectPiCommandNames(pi.getCommands());
-		this.tipCommands = pickSlashCommandTips(pool, {
-			fixed: ["open-tui"],
-			count: 3,
-		});
+		this.tipCommands = pickSlashCommandTips(pool, { fixed: ["open-tui"], count: 3 });
+		this.startAnimation();
+	}
+
+	private startAnimation(): void {
+		if (LOGO_FRAMES.length <= 1) return;
+		this.animationTimer = this.scheduler.setInterval(() => {
+			if (this.disposed) return;
+			if (this.frame >= LOGO_FRAMES.length - 1) {
+				this.stopAnimation();
+				return;
+			}
+			this.frame++;
+			this.tui.requestRender();
+		}, HEADER_LOGO_FRAME_INTERVAL_MS);
+		(this.animationTimer as { unref?: () => void } | undefined)?.unref?.();
+	}
+
+	private stopAnimation(): void {
+		if (this.animationTimer === undefined) return;
+		this.scheduler.clearInterval(this.animationTimer);
+		this.animationTimer = undefined;
 	}
 
 	render(width: number): string[] {
@@ -188,22 +204,18 @@ export class OpenTuiHeader implements Component {
 		const muted = (s: string) => theme.fg("muted", s);
 		const dim = (s: string) => theme.fg("dim", s);
 		const bold = (s: string) => theme.bold(s);
-
 		if (width < 24) return [paint(`Pi v${VERSION}`)];
-
 		const innerWidth = width - 2;
 		const { leftWidth, rightWidth, useTips } = headerColumnWidths(innerWidth);
 		const model = formatModelLabel(this.ctx.model);
 		const effort = formatThinkingLabel(this.pi.getThinkingLevel());
 		const cwd = formatCwd(this.ctx.cwd);
-
 		const leftLines = [
 			...renderLogo(this.frame, paint).map((line) => center(line, leftWidth)),
 			center(bold("Let's build something great"), leftWidth),
 			center(muted(`${model} · ${effort}`), leftWidth),
 			center(dim(cwd), leftWidth),
 		];
-
 		const tipDivider = paint("─".repeat(Math.max(8, Math.min(rightWidth, 22))));
 		const [cmd0 = "", cmd1 = "", cmd2 = "", cmd3 = ""] = this.tipCommands;
 		const tipLines = [
@@ -218,7 +230,6 @@ export class OpenTuiHeader implements Component {
 			muted(cmd3),
 			"",
 		];
-
 		const lines = [borderLine("╭", `${paint("Pi")} v${VERSION}`, "╮", width, paint)];
 		for (let i = 0; i < leftLines.length; i++) {
 			const content = useTips
@@ -232,7 +243,11 @@ export class OpenTuiHeader implements Component {
 
 	invalidate(): void {}
 
-	dispose(): void {}
+	dispose(): void {
+		if (this.disposed) return;
+		this.disposed = true;
+		this.stopAnimation();
+	}
 }
 
 export function installHeader(pi: ExtensionAPI, ctx: ExtensionContext, wheelScrollLines: number): () => void {

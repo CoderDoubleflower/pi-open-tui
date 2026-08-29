@@ -1,3 +1,5 @@
+import type { ToolOutputMode } from "./config.ts";
+
 export const EXPAND_HINT = "(ctrl+o to expand)";
 export const BASH_PROGRESS_LINES = 5;
 export const BASH_RESULT_LINES = 3;
@@ -106,6 +108,28 @@ export function expandHint(summary: string, count: number, expanded: boolean): s
 	return !expanded && count > 0 ? `${summary} ${EXPAND_HINT}` : summary;
 }
 
+export function applyOutputMode(
+	summary: string,
+	contentLines: readonly string[],
+	mode: ToolOutputMode,
+	expanded: boolean,
+	previewLines: number,
+	expandedMaxLines: number,
+): string[] {
+	if (mode === "hidden") return [];
+	if (mode === "summary" || contentLines.length === 0) return [summary];
+	const max = expanded ? expandedMaxLines : previewLines;
+	const shown = contentLines.slice(0, max);
+	const hidden = Math.max(0, contentLines.length - shown.length);
+	// Preview mode shows the actual payload, matching Pi's historical formatter
+	// contract and avoiding an extra synthetic summary row before MCP/OpenAI data.
+	const result = [...shown];
+	if (hidden > 0) {
+		result.push(`… +${hidden} ${plural(hidden, "line")} ${expanded ? "(output capped)" : EXPAND_HINT}`);
+	}
+	return result;
+}
+
 function base64ByteLength(value: string): number {
 	const comma = value.indexOf(",");
 	const base64 = (comma >= 0 ? value.slice(comma + 1) : value).replace(/\s+/g, "");
@@ -126,4 +150,13 @@ export function formatFileSize(bytes: number): string {
 	}
 	const value = bytes / (1024 * 1024);
 	return `${value < 10 ? value.toFixed(1) : Math.round(value)}MB`;
+}
+
+export function stableTextHash(value: string): string {
+	let hash = 2_166_136_261;
+	for (let index = 0; index < value.length; index++) {
+		hash ^= value.charCodeAt(index);
+		hash = Math.imul(hash, 16_777_619);
+	}
+	return (hash >>> 0).toString(36);
 }
