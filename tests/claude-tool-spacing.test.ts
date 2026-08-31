@@ -354,3 +354,45 @@ test("prototype renderer intercepts adapter direct tools by label and preserves 
 		cleanup();
 	}
 });
+
+test("wrapped Bash result lines keep the five-column Claude continuation gutter", () => {
+	const prototype = {
+		render(_width: number): string[] {
+			return ["ORIGINAL"];
+		},
+	};
+	const cleanup = installClaudeToolRenderer(() => theme, { prototype });
+	try {
+		const width = 42;
+		const bash = {
+			toolName: "bash",
+			args: { command: "rg -n pattern" },
+			cwd: "/repo",
+			expanded: true,
+			isPartial: false,
+			executionStarted: true,
+			result: {
+				isError: false,
+				content: [{
+					type: "text",
+					text: [
+						"Window/widget/MainMenuSetting/SubMenu/TrainMode/TrainModeBtmView.cpp:179: CMessageBox dialog",
+						"AI-driven semantic code search returns relevant file paths with line ranges and follow-up keywords.",
+					].join("\n"),
+				}],
+			},
+			ui: { requestRender() {} },
+		};
+		const rendered = prototype.render.call(bash, width);
+		const plain = rendered.map((line) => stripAnsi(line).trimEnd());
+		const resultIndex = plain.findIndex((line) => line.includes("⎿"));
+		assert.ok(resultIndex > 0);
+		const body = plain.slice(resultIndex);
+		assert.ok(body.length > 2);
+		assert.match(body[0] ?? "", /^  ⎿  /);
+		assert.ok(body.slice(1).every((line) => line.startsWith("     ")));
+		assert.ok(rendered.every((line) => visibleWidth(line) <= width));
+	} finally {
+		cleanup();
+	}
+});

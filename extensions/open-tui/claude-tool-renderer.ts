@@ -386,11 +386,25 @@ function diffLinesForTool(
 
 function renderResultBody(lines: readonly string[], width: number): string[] {
 	if (lines.length === 0) return [];
-	return new Text(
-		[`${responsePrefix()}${lines[0]}`, ...lines.slice(1).map((line) => `${DIFF_INDENT}${line}`)].join("\n"),
-		0,
-		0,
-	).render(width);
+	const safeWidth = Math.max(1, width);
+	const fullIndentWidth = visibleWidth(DIFF_INDENT);
+	const indentWidth = Math.min(fullIndentWidth, Math.max(0, safeWidth - 1));
+	const continuationPrefix = DIFF_INDENT.slice(0, indentWidth);
+	const firstPrefix = indentWidth === fullIndentWidth ? responsePrefix() : continuationPrefix;
+	const contentWidth = Math.max(1, safeWidth - indentWidth);
+	const rendered: string[] = [];
+
+	for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+		const normalizedLine = (lines[lineIndex] ?? "").replaceAll("\t", "   ");
+		const wrapped = wrapTextWithAnsi(normalizedLine, contentWidth);
+		const fragments = wrapped.length > 0 ? wrapped : [""];
+		for (let fragmentIndex = 0; fragmentIndex < fragments.length; fragmentIndex++) {
+			const prefix = lineIndex === 0 && fragmentIndex === 0 ? firstPrefix : continuationPrefix;
+			rendered.push(padLine(`${prefix}${fragments[fragmentIndex] ?? ""}`, safeWidth));
+		}
+	}
+
+	return rendered;
 }
 
 function renderClaudeTool(
