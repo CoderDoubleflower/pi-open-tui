@@ -114,6 +114,123 @@ function compactArgs(args: Record<string, unknown>, expanded: boolean): string {
 		.join(", ");
 }
 
+function objectItems(value: unknown): Record<string, unknown>[] {
+	return Array.isArray(value) ? value.filter(isObject) : [];
+}
+
+function operationDetail(label: string, values: string[], expanded: boolean): string {
+	const normalized = values.map((value) => value.trim()).filter(Boolean);
+	if (normalized.length === 0) return "";
+	const [first, ...rest] = normalized;
+	return compactValue(`${label} ${first}${rest.length > 0 ? ` (+${rest.length})` : ""}`, expanded);
+}
+
+export function summarizeClaudeWebSearchCommands(
+	argsValue: unknown,
+	expanded = false,
+): string {
+	const args = isObject(argsValue) ? argsValue : {};
+	const searchQueries = objectItems(args.search_query);
+	if (searchQueries.length > 0) {
+		return operationDetail(
+			"Search",
+			searchQueries.map((query) => asString(query.q) ?? ""),
+			expanded,
+		);
+	}
+	const imageQueries = objectItems(args.image_query);
+	if (imageQueries.length > 0) {
+		return operationDetail(
+			"Search images",
+			imageQueries.map((query) => asString(query.q) ?? ""),
+			expanded,
+		);
+	}
+	const openOperations = objectItems(args.open);
+	if (openOperations.length > 0) {
+		return operationDetail(
+			"Open",
+			openOperations.map((operation) => asString(operation.ref_id) ?? ""),
+			expanded,
+		);
+	}
+	const clickOperations = objectItems(args.click);
+	if (clickOperations.length > 0) {
+		return operationDetail(
+			"Open link",
+			clickOperations.map((operation) => {
+				const refId = asString(operation.ref_id) ?? "";
+				const linkId = typeof operation.id === "number" ? String(operation.id) : "";
+				return `${refId}${linkId ? `#${linkId}` : ""}`;
+			}),
+			expanded,
+		);
+	}
+	const findOperations = objectItems(args.find);
+	if (findOperations.length > 0) {
+		return operationDetail(
+			"Find",
+			findOperations.map((operation) => {
+				const pattern = asString(operation.pattern) ?? "";
+				const refId = asString(operation.ref_id) ?? "";
+				return pattern && refId ? `'${pattern}' in ${refId}` : pattern || refId;
+			}),
+			expanded,
+		);
+	}
+	const screenshots = objectItems(args.screenshot);
+	if (screenshots.length > 0) {
+		return operationDetail(
+			"Screenshot",
+			screenshots.map((operation) => {
+				const refId = asString(operation.ref_id) ?? "";
+				const page = typeof operation.pageno === "number" ? String(operation.pageno) : "";
+				return `${refId}${page ? ` page ${page}` : ""}`;
+			}),
+			expanded,
+		);
+	}
+	const financeOperations = objectItems(args.finance);
+	if (financeOperations.length > 0) {
+		return operationDetail(
+			"Finance",
+			financeOperations.map((operation) => asString(operation.ticker) ?? ""),
+			expanded,
+		);
+	}
+	const weatherOperations = objectItems(args.weather);
+	if (weatherOperations.length > 0) {
+		return operationDetail(
+			"Weather",
+			weatherOperations.map((operation) => asString(operation.location) ?? ""),
+			expanded,
+		);
+	}
+	const sportsOperations = objectItems(args.sports);
+	if (sportsOperations.length > 0) {
+		return operationDetail(
+			"Sports",
+			sportsOperations.map((operation) =>
+				[asString(operation.league), asString(operation.fn)].filter(Boolean).join(" "),
+			),
+			expanded,
+		);
+	}
+	const timeOperations = objectItems(args.time);
+	if (timeOperations.length > 0) {
+		return operationDetail(
+			"Time",
+			timeOperations.map((operation) => asString(operation.utc_offset) ?? ""),
+			expanded,
+		);
+	}
+
+	const legacyQuery = asString(
+		args.query ?? args.q ?? (typeof args.search_query === "string" ? args.search_query : undefined),
+	);
+	return legacyQuery ? compactValue(legacyQuery, expanded) : "";
+}
+
 function applyPatchDetail(args: Record<string, unknown>, expanded: boolean): string {
 	const patch = asString(args.patch ?? args.input ?? args.diff);
 	if (!patch) return "";
@@ -143,7 +260,7 @@ export function formatClaudeOpenAiToolUse(
 	if (identity.kind === "web-search") {
 		return {
 			name: identity.name,
-			detail: compactValue(args.query ?? args.search_query ?? args.q ?? "", expanded),
+			detail: summarizeClaudeWebSearchCommands(args, expanded),
 		};
 	}
 	if (identity.kind === "web-fetch") {
@@ -182,6 +299,9 @@ export function formatClaudeOpenAiToolResult(
 ): string[] {
 	const args = isObject(argsValue) ? argsValue : {};
 	const result = isObject(resultValue) ? resultValue as ToolResultLike : undefined;
+	if (identity.kind === "web-search") {
+		return status === "error" ? errorLines(result, expanded) : [];
+	}
 	if (status === "pending") return identity.kind === "shell" ? ["Waiting…"] : [];
 	const output = structuredTextOutput(result);
 	const contentLines = output ? output.split("\n") : [];
