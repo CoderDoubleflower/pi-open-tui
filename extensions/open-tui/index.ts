@@ -21,7 +21,6 @@ import {
 import { TOKEN_COUNTER_FRAME_MS } from "./spinner-state.ts";
 import { formatTurnTelemetry, TurnTelemetryTracker } from "./telemetry.ts";
 import { registerTodoIntegration } from "./todo.ts";
-import { registerToolSettingsCommand } from "./tool-settings-command.ts";
 import { installCompactUserMessages } from "./user-message.ts";
 import {
 	createInitialState,
@@ -373,10 +372,6 @@ export function registerOpenTui(pi: ExtensionAPI, spinnerDependencies?: SpinnerD
 		refreshInteractiveState(ctx);
 	});
 
-	registerToolSettingsCommand(pi, {
-		getConfig: () => config,
-		onConfigChanged: applyConfigChange,
-	});
 	registerSettingsCommand(pi, {
 		getConfig: () => config,
 		onConfigChanged: applyConfigChange,

@@ -46,7 +46,7 @@
 - **Turn Telemetry**：每次完整 Agent run 结束后汇总 TPS、TTFT、耗时、输入/输出 Token、stall 和费用速率。
 - **自定义 Footer Script**：可用任意可执行脚本完全替换内置 Footer，脚本通过 stdin 接收有界、无敏感信息的 JSON 状态。
 - **共享 Spinner Event Bus**：其他扩展可发布任务、主消息覆盖和后缀；[`pi-ask-user-question`](https://github.com/CoderDoubleflower/pi-ask-user-question) 可直接联动。
-- **交互式设置**：`/open-tui` 管理常规、图标、Spinner、Footer 和遥测；`/open-tui-tools` 管理工具渲染。
+- **交互式设置**：统一通过 `/open-tui` 管理常规、图标、Spinner、Footer、遥测和工具渲染策略。
 - **Claude 风格主题**：附带可选的 `claude-theme` 深色主题。
 
 ## 安装
@@ -91,17 +91,13 @@ pi update --extensions
 
 设置界面支持英文和简体中文。建议首次使用时检查：
 
-1. General：启用状态、设置语言、补全菜单方向、全屏滚轮速度。
+1. General：启用状态、设置语言、补全菜单方向、全屏滚轮速度；选择 `Tool rendering` 可进入工具渲染配置页。
 2. Icons：自动、Nerd Font 或 ASCII 图标。
 3. Spinner：动画、计时、Token、Thinking、stall、任务事件和自定义动词。
 4. Footer：选择需要显示的状态段。
 5. Telemetry：选择每轮结束后展示的统计项。
 
-工具渲染状态：
-
-```text
-/open-tui-tools status
-```
+工具渲染配置页可直接设置渲染开关、工具分组、五类工具结果输出策略、预览行数、实时预览和 Diff 显示。所有改动都会立即保存。
 
 安装后可打开 Pi 的：
 
@@ -198,22 +194,16 @@ pi update --extensions
 
 ## 工具渲染配置
 
-运行时命令会立即保存到 `open-tui.json`：
+执行 `/open-tui`，在 `General` 页选择 `Tool rendering`。设置页支持：
 
-```text
-/open-tui-tools enabled on|off|toggle
-/open-tui-tools group on|off|toggle
-/open-tui-tools read|search|bash|mcp|openai hidden|summary|preview
-/open-tui-tools preview <1-50>
-/open-tui-tools expanded <100-20000>
-/open-tui-tools live on|off|toggle
-/open-tui-tools live-lines <1-20>
-/open-tui-tools diff-lines <4-200>
-/open-tui-tools diff-layout auto|unified|split
-/open-tui-tools diff-theme <shiki-theme>
-```
+- 工具渲染与工具调用分组开关。
+- Read、Search、Bash、MCP、OpenAI 输出策略：`hidden`、`summary`、`preview`。
+- 折叠预览行数 `1–50`，展开预览上限 `100–20000`。
+- 实时预览开关与实时预览行数 `1–20`。
+- Diff 折叠行数 `4–200`，以及 `auto`、`unified`、`split` 布局。
+- Shiki Diff 主题名，最多 80 个字符。
 
-关闭分组后，当前已分组的工具组件会立即恢复到 Pi 的普通消息树。完整设计说明见 [`docs/claude-tool-rendering.md`](docs/claude-tool-rendering.md)。
+布尔值和枚举使用 `Enter`/`Space` 切换；数字与主题名会进入单行输入状态。设置会立即写入 `open-tui.json`。关闭分组后，当前已分组的工具组件会立即恢复到 Pi 的普通消息树。旧的 `/open-tui-tools` 命令不再注册。完整设计说明见 [`docs/claude-tool-rendering.md`](docs/claude-tool-rendering.md)。
 
 ## Spinner
 
