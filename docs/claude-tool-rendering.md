@@ -40,21 +40,16 @@ Settings are stored in `~/.pi/agent/open-tui.json` under `toolRendering`:
 
 Output modes are `hidden`, `summary`, and `preview`. Diff layouts are `auto`, `unified`, and `split`.
 
-## Runtime command
+## Settings panel
 
-Use `/open-tui-tools status` to inspect the active configuration. Other commands persist immediately:
+Run `/open-tui`, then choose **General → Tool rendering**. The nested panel exposes every `toolRendering` setting:
 
-```text
-/open-tui-tools enabled on|off|toggle
-/open-tui-tools group on|off|toggle
-/open-tui-tools read|search|bash|mcp|openai hidden|summary|preview
-/open-tui-tools preview <1-50>
-/open-tui-tools expanded <100-20000>
-/open-tui-tools live on|off|toggle
-/open-tui-tools live-lines <1-20>
-/open-tui-tools diff-lines <4-200>
-/open-tui-tools diff-layout auto|unified|split
-/open-tui-tools diff-theme <shiki-theme>
-```
+- Enable or disable Claude-style rendering and adjacent/concurrent tool grouping.
+- Choose `hidden`, `summary`, or `preview` independently for Read, Search, Bash, MCP, and OpenAI-style results.
+- Set collapsed preview lines from `1–50` and the expanded preview cap from `100–20000`.
+- Enable or disable the running-tool live preview and set its line count from `1–20`.
+- Set collapsed Diff lines from `4–200`, choose `auto`, `unified`, or `split`, and enter a Shiki theme name up to 80 characters.
 
-Changing grouping off immediately restores currently grouped tool components to the normal Pi message tree. Unknown or unsupported tools always fall back to Pi's original renderer.
+Press `Enter` or `Space` to toggle booleans and cycle enums. Numeric and theme settings open an inline input with validation. Every accepted change is written to `open-tui.json` immediately. Press `Esc` or `←` to return to the main settings panel.
+
+The legacy `/open-tui-tools` command is no longer registered. Changing grouping off immediately restores currently grouped tool components to the normal Pi message tree. Unknown or unsupported tools always fall back to Pi's original renderer.
