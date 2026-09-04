@@ -32,6 +32,10 @@ import {
 	type ClaudeToolStatus,
 } from "./claude-tool-renderer-shared.ts";
 import { formatClaudeToolUse } from "./claude-tool-use.ts";
+import {
+	isCodexSubagentToolName,
+	renderCodexSubagentTool,
+} from "./codex-subagent-renderer.ts";
 
 export {
 	formatClaudeMcpToolResult,
@@ -142,6 +146,7 @@ export function isClaudeRenderableTool(value: unknown): value is ClaudeToolCompo
 	if (!isObject(value)) return false;
 	const toolName = asString(value.toolName);
 	if (!toolName) return false;
+	if (isCodexSubagentToolName(toolName)) return true;
 	if (NATIVE_TOOLS.has(toolName.toLowerCase())) return true;
 	return !!identifyClaudeMcpTool(toolName, value.toolDefinition, value.args)
 		|| !!identifyClaudeOpenAiTool(toolName, value.toolDefinition);
@@ -446,6 +451,15 @@ export function installClaudeToolRenderer(
 		if (!config.enabled || !isClaudeRenderableTool(this)) {
 			if (typeof this === "object" && this) blink.remove(this);
 			return previousRender.call(this, width);
+		}
+		if (isCodexSubagentToolName(this.toolName)) {
+			if (typeof this === "object" && this) blink.remove(this);
+			try {
+				return renderCodexSubagentTool(this, getTheme(), width, config.subagents)
+					?? previousRender.call(this, width);
+			} catch {
+				return previousRender.call(this, width);
+			}
 		}
 		const status = parseClaudeToolStatus(this);
 		if (!status || !isRenderRequester(this.ui)) {

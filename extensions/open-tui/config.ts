@@ -13,6 +13,16 @@ export type AutocompleteDirection = "up" | "down";
 export type ToolOutputMode = "hidden" | "summary" | "preview";
 export type ToolDiffLayout = "auto" | "unified" | "split";
 
+export interface SubagentRenderingConfig {
+	enabled: boolean;
+	collapsedActivityItems: number;
+	expandedActivityItems: number;
+	showToolActivity: boolean;
+	showUsage: boolean;
+	showElapsed: boolean;
+	showExpandHint: boolean;
+}
+
 export type { IconMode } from "./icons.ts";
 
 export interface FooterSegments {
@@ -84,6 +94,7 @@ export interface ToolRenderingConfig {
 	diffCollapsedLines: number;
 	diffLayout: ToolDiffLayout;
 	diffTheme: string;
+	subagents: SubagentRenderingConfig;
 }
 
 export interface OpenTuiConfig {
@@ -119,6 +130,15 @@ export const DEFAULT_TOOL_RENDERING_CONFIG: ToolRenderingConfig = {
 	diffCollapsedLines: 24,
 	diffLayout: "auto",
 	diffTheme: "github-dark",
+	subagents: {
+		enabled: true,
+		collapsedActivityItems: 3,
+		expandedActivityItems: 200,
+		showToolActivity: true,
+		showUsage: true,
+		showElapsed: true,
+		showExpandHint: true,
+	},
 };
 
 export const DEFAULT_CONFIG: OpenTuiConfig = {
@@ -238,6 +258,23 @@ function normalizeToolRendering(config: ToolRenderingConfig): void {
 		config.diffTheme = defaults.diffTheme;
 	} else {
 		config.diffTheme = config.diffTheme.trim().slice(0, 80);
+	}
+	const subagentDefaults = defaults.subagents;
+	if (typeof config.subagents.enabled !== "boolean") config.subagents.enabled = subagentDefaults.enabled;
+	config.subagents.collapsedActivityItems = normalizeInteger(
+		config.subagents.collapsedActivityItems,
+		subagentDefaults.collapsedActivityItems,
+		0,
+		20,
+	);
+	config.subagents.expandedActivityItems = normalizeInteger(
+		config.subagents.expandedActivityItems,
+		subagentDefaults.expandedActivityItems,
+		1,
+		5_000,
+	);
+	for (const key of ["showToolActivity", "showUsage", "showElapsed", "showExpandHint"] as const) {
+		if (typeof config.subagents[key] !== "boolean") config.subagents[key] = subagentDefaults[key];
 	}
 }
 

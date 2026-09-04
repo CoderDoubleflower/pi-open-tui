@@ -1,0 +1,35 @@
+name: Fix Codex renderer validation harness
+
+on:
+  push:
+    branches: [feat/subagent-rendering]
+    paths:
+      - ".github/workflows/fix-codex-renderer-test-signatures.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Correct prototype signatures and retrigger the rewrite
+        shell: bash
+        run: |
+          set -euo pipefail
+          python <<'PY'
+          from pathlib import Path
+          path = Path('.github/workflows/reframe-codex-subagent-renderer-v3.yml')
+          if path.exists():
+              text = path.read_text(encoding='utf-8')
+              text = text.replace('render(): string[] {', 'render(_width: number): string[] {')
+              text = text.replace('const disabledPrototype = { render: () => ["ORIGINAL"] };', 'const disabledPrototype = { render: (_width: number) => ["ORIGINAL"] };')
+              path.write_text(text, encoding='utf-8')
+          Path('.github/workflows/fix-codex-renderer-test-signatures.yml').unlink()
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: fix Codex renderer validation harness"
+          git push origin HEAD:feat/subagent-rendering

@@ -19,6 +19,7 @@
 
 - 统一渲染 Pi 内置的 `read`、`write`、`edit`、`bash`、`grep`、`find`、`ls`。
 - 支持 MCP 工具，以及 `shell_command`、`apply_patch`、`web_search`、`web_fetch`、task/context 等常见 OpenAI 风格工具。
+- 按 Codex 多代理约定识别 `spawn_agent`、`send_input`、`wait_agent`、`close_agent`、`list_agents`，并以 Claude Code 风格显示代理状态、活动树、Token、耗时和展开详情。
 - 相邻或并发工具调用可合并为一条紧凑状态组。
 - `edit`、`write`、`apply_patch` 在参数完整后显示真实 diff 预览。
 - Diff 支持统一/左右分栏布局、终端宽度自动选择、增删行和 hunk 统计、词级强调，以及可用时的 Shiki 语法高亮。
@@ -97,7 +98,7 @@ pi update --extensions
 4. Footer：选择需要显示的状态段。
 5. Telemetry：选择每轮结束后展示的统计项。
 
-工具渲染配置页可直接设置渲染开关、工具分组、五类工具结果输出策略、预览行数、实时预览和 Diff 显示。所有改动都会立即保存。
+工具渲染配置页可直接设置渲染开关、工具分组、五类工具结果输出策略、预览行数、实时预览、Diff 显示和 Codex 风格 Subagent 的展示密度。所有改动都会立即保存。
 
 安装后可打开 Pi 的：
 
@@ -185,7 +186,16 @@ pi update --extensions
     "livePreviewLines": 5,
     "diffCollapsedLines": 24,
     "diffLayout": "auto",
-    "diffTheme": "github-dark"
+    "diffTheme": "github-dark",
+    "subagents": {
+      "enabled": true,
+      "collapsedActivityItems": 3,
+      "expandedActivityItems": 200,
+      "showToolActivity": true,
+      "showUsage": true,
+      "showElapsed": true,
+      "showExpandHint": true
+    }
   }
 }
 ```
@@ -202,8 +212,11 @@ pi update --extensions
 - 实时预览开关与实时预览行数 `1–20`。
 - Diff 折叠行数 `4–200`，以及 `auto`、`unified`、`split` 布局。
 - Shiki Diff 主题名，最多 80 个字符。
+- Codex 风格 Subagent 渲染开关、折叠活动数 `0–20`、展开活动上限 `1–5000`，以及工具活动、Token、耗时和展开提示开关。
 
 布尔值和枚举使用 `Enter`/`Space` 切换；数字与主题名会进入单行输入状态。设置会立即写入 `open-tui.json`。关闭分组后，当前已分组的工具组件会立即恢复到 Pi 的普通消息树。旧的 `/open-tui-tools` 命令不再注册。完整设计说明见 [`docs/claude-tool-rendering.md`](docs/claude-tool-rendering.md)。
+
+Subagent 识别是**约定匹配**，不是插件匹配：`pi-open-tui` 只检查 Codex 的标准工具名、调用参数和结果形状；不会导入、声明或查找某个 Subagent 插件，也不要求结果携带包名标记。任何实现相同 Codex 风格接口的工具都可以复用这套 Claude Code 风格渲染。
 
 ## Spinner
 

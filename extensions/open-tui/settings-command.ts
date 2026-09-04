@@ -17,6 +17,7 @@ import type {
 	SpinnerEffortDisplay,
 	SpinnerTaskIntegration,
 	SpinnerVerbMode,
+	SubagentRenderingConfig,
 	ToolDiffLayout,
 	ToolOutputMode,
 	ToolRenderingConfig,
@@ -35,7 +36,14 @@ interface SettingItem {
 
 type Tab = "features" | "icons" | "spinner" | "segments" | "telemetry";
 type SettingsView = "main" | "tools";
-type ToolEditableSettingId = "previewLines" | "expandedPreviewMaxLines" | "livePreviewLines" | "diffCollapsedLines" | "diffTheme";
+type ToolEditableSettingId =
+	| "previewLines"
+	| "expandedPreviewMaxLines"
+	| "livePreviewLines"
+	| "diffCollapsedLines"
+	| "diffTheme"
+	| "subagentCollapsedActivityItems"
+	| "subagentExpandedActivityItems";
 
 const TABS: Tab[] = ["features", "icons", "spinner", "segments", "telemetry"];
 const TOOL_PANEL_ITEM_ID = "toolRenderingPanel";
@@ -48,6 +56,8 @@ const TOOL_EDIT_SPECS = {
 	livePreviewLines: { min: 1, max: 20 },
 	diffCollapsedLines: { min: 4, max: 200 },
 	diffTheme: { maxLength: 80 },
+	subagentCollapsedActivityItems: { min: 0, max: 20 },
+	subagentExpandedActivityItems: { min: 1, max: 5_000 },
 } as const;
 
 const COPY = {
@@ -106,6 +116,13 @@ const COPY = {
 			diffLayout: "Diff layout",
 			diffCollapsedLines: "Collapsed diff lines",
 			diffTheme: "Diff theme",
+			subagentRenderingEnabled: "Codex Subagent rendering",
+			subagentCollapsedActivityItems: "Collapsed Subagent activities",
+			subagentExpandedActivityItems: "Expanded Subagent activity cap",
+			subagentShowToolActivity: "Subagent tool activity",
+			subagentShowUsage: "Subagent token usage",
+			subagentShowElapsed: "Subagent elapsed time",
+			subagentShowExpandHint: "Subagent expand hint",
 		},
 		values: {
 			on: "On",
@@ -187,6 +204,13 @@ const COPY = {
 			diffLayout: "Diff 布局",
 			diffCollapsedLines: "折叠 Diff 行数",
 			diffTheme: "Diff 主题",
+			subagentRenderingEnabled: "Codex 风格 Subagent 渲染",
+			subagentCollapsedActivityItems: "Subagent 折叠活动数",
+			subagentExpandedActivityItems: "Subagent 展开活动上限",
+			subagentShowToolActivity: "Subagent 工具活动",
+			subagentShowUsage: "Subagent Token 用量",
+			subagentShowElapsed: "Subagent 耗时",
+			subagentShowExpandHint: "Subagent 展开提示",
 		},
 		values: {
 			on: "开启",
@@ -295,6 +319,15 @@ function updateTools(config: OpenTuiConfig, update: Partial<ToolRenderingConfig>
 	return { ...config, toolRendering: { ...config.toolRendering, ...update } };
 }
 
+function updateSubagentRendering(
+	config: OpenTuiConfig,
+	update: Partial<SubagentRenderingConfig>,
+): OpenTuiConfig {
+	return updateTools(config, {
+		subagents: { ...config.toolRendering.subagents, ...update },
+	});
+}
+
 function handleToolSettingChange(itemId: string, config: OpenTuiConfig): OpenTuiConfig {
 	const tools = config.toolRendering;
 	switch (itemId) {
@@ -307,6 +340,11 @@ function handleToolSettingChange(itemId: string, config: OpenTuiConfig): OpenTui
 		case "openAiOutputMode": return updateTools(config, { openAiOutputMode: cycleValue(tools.openAiOutputMode, OUTPUT_MODE_ORDER) });
 		case "livePreview": return updateTools(config, { livePreview: !tools.livePreview });
 		case "diffLayout": return updateTools(config, { diffLayout: cycleValue(tools.diffLayout, DIFF_LAYOUT_ORDER) });
+		case "subagentRenderingEnabled": return updateSubagentRendering(config, { enabled: !tools.subagents.enabled });
+		case "subagentShowToolActivity": return updateSubagentRendering(config, { showToolActivity: !tools.subagents.showToolActivity });
+		case "subagentShowUsage": return updateSubagentRendering(config, { showUsage: !tools.subagents.showUsage });
+		case "subagentShowElapsed": return updateSubagentRendering(config, { showElapsed: !tools.subagents.showElapsed });
+		case "subagentShowExpandHint": return updateSubagentRendering(config, { showExpandHint: !tools.subagents.showExpandHint });
 		default: return config;
 	}
 }
@@ -317,6 +355,8 @@ function updateNumericToolSetting(config: OpenTuiConfig, itemId: Exclude<ToolEdi
 		case "expandedPreviewMaxLines": return updateTools(config, { expandedPreviewMaxLines: value });
 		case "livePreviewLines": return updateTools(config, { livePreviewLines: value });
 		case "diffCollapsedLines": return updateTools(config, { diffCollapsedLines: value });
+		case "subagentCollapsedActivityItems": return updateSubagentRendering(config, { collapsedActivityItems: value });
+		case "subagentExpandedActivityItems": return updateSubagentRendering(config, { expandedActivityItems: value });
 	}
 }
 
@@ -331,6 +371,8 @@ function rawToolSettingValue(config: ToolRenderingConfig, itemId: ToolEditableSe
 		case "livePreviewLines": return String(config.livePreviewLines);
 		case "diffCollapsedLines": return String(config.diffCollapsedLines);
 		case "diffTheme": return config.diffTheme;
+		case "subagentCollapsedActivityItems": return String(config.subagents.collapsedActivityItems);
+		case "subagentExpandedActivityItems": return String(config.subagents.expandedActivityItems);
 	}
 }
 
@@ -451,6 +493,13 @@ function buildToolItems(config: OpenTuiConfig, copy: SettingsCopy): SettingItem[
 		{ id: "diffLayout", label: copy.labels.diffLayout, currentValue: copy.values.diffLayouts[tools.diffLayout] },
 		{ id: "diffCollapsedLines", label: copy.labels.diffCollapsedLines, currentValue: copy.values.lines(tools.diffCollapsedLines) },
 		{ id: "diffTheme", label: copy.labels.diffTheme, currentValue: tools.diffTheme },
+		{ id: "subagentRenderingEnabled", label: copy.labels.subagentRenderingEnabled, currentValue: flag(tools.subagents.enabled) },
+		{ id: "subagentCollapsedActivityItems", label: copy.labels.subagentCollapsedActivityItems, currentValue: copy.values.lines(tools.subagents.collapsedActivityItems) },
+		{ id: "subagentExpandedActivityItems", label: copy.labels.subagentExpandedActivityItems, currentValue: copy.values.lines(tools.subagents.expandedActivityItems) },
+		{ id: "subagentShowToolActivity", label: copy.labels.subagentShowToolActivity, currentValue: flag(tools.subagents.showToolActivity) },
+		{ id: "subagentShowUsage", label: copy.labels.subagentShowUsage, currentValue: flag(tools.subagents.showUsage) },
+		{ id: "subagentShowElapsed", label: copy.labels.subagentShowElapsed, currentValue: flag(tools.subagents.showElapsed) },
+		{ id: "subagentShowExpandHint", label: copy.labels.subagentShowExpandHint, currentValue: flag(tools.subagents.showExpandHint) },
 	];
 }
 

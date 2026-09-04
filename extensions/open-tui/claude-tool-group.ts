@@ -14,6 +14,11 @@ const NON_GROUPABLE_TOOL_NAMES = new Set([
 	"exit_plan_mode",
 	"plan_write",
 	"planwrite",
+	"spawn_agent",
+	"send_input",
+	"wait_agent",
+	"close_agent",
+	"list_agents",
 ]);
 
 interface ParentContainer extends Component {
