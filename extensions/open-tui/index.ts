@@ -230,6 +230,12 @@ export function registerOpenTui(pi: ExtensionAPI, spinnerDependencies?: SpinnerD
 		}
 	};
 
+	const finishCompaction = (resumeRequested: boolean) => {
+		const shouldResume = resumeRequested && state.workingSince !== undefined;
+		spinnerInstallation?.controller.afterCompact(shouldResume);
+		if (shouldResume) startWorkingTimer();
+	};
+
 	const applyConfigChange = (newConfig: OpenTuiConfig) => {
 		const wasEnabled = config.enabled;
 		const wasSpinnerEnabled = config.spinner.enabled;
@@ -358,11 +364,13 @@ export function registerOpenTui(pi: ExtensionAPI, spinnerDependencies?: SpinnerD
 		if (!sessionLifecycle.isCurrent()) return;
 		stopWorkingTimer();
 		settleCompactionFailure(state, event.willRetry);
+		finishCompaction(event.willRetry);
 		invalidateUsageCache();
 		refreshInteractiveState(ctx);
 	});
 	pi.on("session_compact", (_event, ctx) => {
 		if (!sessionLifecycle.isCurrent()) return;
+		finishCompaction(true);
 		invalidateUsageCache();
 		refreshInteractiveState(ctx);
 	});
