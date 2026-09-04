@@ -103,6 +103,7 @@ export class SpinnerController implements SpinnerWidgetSource {
 	private completionVerb = "Worked";
 	private nativeStatus: NativeStatusState | undefined;
 	private retryContinuation: RetryContinuationState | undefined;
+	private compactionContinuation: SpinnerRuntimeState | undefined;
 	private disposed = false;
 
 	constructor(
@@ -209,6 +210,9 @@ export class SpinnerController implements SpinnerWidgetSource {
 	nativeStatusStart(token: object, presentation: NativeStatusPresentation): void {
 		if (this.disposed || presentation.style === "working") return;
 		if (presentation.style === "system-requesting") {
+			// Pi mounts the native compaction status before session_before_compact.
+			// Capture the active row here so the later lifecycle hook cannot lose it.
+			if (presentation.kind === "compaction") this.captureCompactionContinuation();
 			this.retryContinuation = undefined;
 			this.stateMachine.hide();
 		} else {
@@ -250,6 +254,7 @@ export class SpinnerController implements SpinnerWidgetSource {
 		const continuation = this.retryContinuation;
 		this.nativeStatus = undefined;
 		this.retryContinuation = undefined;
+		this.compactionContinuation = undefined;
 		this.stateMachine.agentStart(effortValue(level, reasoning));
 		if (continuation) this.restoreRetryContinuation(continuation);
 		this.publish();
@@ -257,7 +262,8 @@ export class SpinnerController implements SpinnerWidgetSource {
 
 	agentEnd(): void {
 		if (this.disposed) return;
-		const wasRunning = this.state.phase === "running";
+		const wasRunning = this.state.phase === "running" || this.compactionContinuation !== undefined;
+		this.compactionContinuation = undefined;
 		this.stateMachine.agentEnd();
 		if (wasRunning) {
 			this.completionVerb = this.dependencies.random.pick(TURN_COMPLETION_VERBS);
@@ -302,11 +308,29 @@ export class SpinnerController implements SpinnerWidgetSource {
 
 	beforeCompact(): void {
 		if (this.disposed) return;
+		// Pre-request compaction stays inside the same agent run. Suspend rather
+		// than destroy its spinner state so session_compact can resume the row.
+		this.captureCompactionContinuation();
 		this.retryContinuation = undefined;
 		this.stateMachine.hide();
-		this.eventStore.agentEnd();
-		this.suffixStore.agentEnd();
 		this.publish();
+	}
+
+	afterCompact(resume = true): boolean {
+		if (this.disposed) return false;
+		const continuation = this.compactionContinuation;
+		this.compactionContinuation = undefined;
+		if (!resume || !continuation) {
+			if (!resume) {
+				this.eventStore.agentEnd();
+				this.suffixStore.agentEnd();
+			}
+			this.publish();
+			return false;
+		}
+		this.restoreCompactionContinuation(continuation);
+		this.publish();
+		return true;
 	}
 
 	dispose(): void {
@@ -314,12 +338,30 @@ export class SpinnerController implements SpinnerWidgetSource {
 		this.disposed = true;
 		this.nativeStatus = undefined;
 		this.retryContinuation = undefined;
+		this.compactionContinuation = undefined;
 		this.stateMachine.hide();
 		this.eventStore.dispose();
 		this.suffixStore.dispose();
 		this.requestRender?.();
 		this.requestRender = undefined;
 		this.lastRenderSignature = "";
+	}
+
+	private captureCompactionContinuation(): void {
+		if (this.compactionContinuation || this.state.phase !== "running") return;
+		this.compactionContinuation = {
+			...this.state,
+			activeToolIds: new Set(this.state.activeToolIds),
+		};
+	}
+
+	private restoreCompactionContinuation(continuation: SpinnerRuntimeState): void {
+		const now = this.dependencies.clock.now();
+		Object.assign(this.state, continuation);
+		this.state.activeToolIds = new Set(continuation.activeToolIds);
+		if (this.state.lastTokenAnimationAtMs !== null) this.state.lastTokenAnimationAtMs = now;
+		if (this.state.lastResponseAtMs !== null) this.state.lastResponseAtMs = now;
+		this.state.stalledIntensity = 0;
 	}
 
 	private captureRetryContinuation(): void {
