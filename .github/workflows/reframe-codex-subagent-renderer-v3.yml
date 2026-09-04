@@ -1,0 +1,917 @@
+name: Reframe Codex-style Subagent renderer
+
+on:
+  push:
+    branches: [feat/subagent-rendering]
+    paths:
+      - ".github/workflows/reframe-codex-subagent-renderer-v3.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  rewrite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Replace branded adapter with a structural Codex adapter
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > extensions/open-tui/codex-subagent-renderer.ts <<'TS'
+          import { getMarkdownTheme, type Theme } from "@earendil-works/pi-coding-agent";
+          import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
+          import type { SubagentRenderingConfig } from "./config.ts";
+          import { asString, isObject } from "./claude-tool-renderer-shared.ts";
+
+          export type CodexSubagentAction = "spawn" | "send" | "wait" | "close" | "list";
+          export type CodexSubagentStatus =
+          	| "starting"
+          	| "running"
+          	| "completed"
+          	| "errored"
+          	| "interrupted"
+          	| "closed";
+          type CodexActivityStatus = "running" | "completed" | "errored";
+
+          const TOOL_ACTIONS = {
+          	spawn_agent: "spawn",
+          	send_input: "send",
+          	wait_agent: "wait",
+          	close_agent: "close",
+          	list_agents: "list",
+          } as const satisfies Record<string, CodexSubagentAction>;
+
+          export const CODEX_SUBAGENT_TOOL_NAMES = new Set(Object.keys(TOOL_ACTIONS));
+
+          interface CodexUsage {
+          	input: number;
+          	output: number;
+          	cacheRead: number;
+          	cacheWrite: number;
+          	cost: number;
+          	turns: number;
+          }
+
+          interface CodexActivity {
+          	id: string;
+          	kind: "tool" | "message" | "system";
+          	name: string;
+          	summary: string;
+          	status: CodexActivityStatus;
+          	startedAt: number;
+          	endedAt?: number;
+          }
+
+          interface CodexSnapshot {
+          	id: string;
+          	taskName: string;
+          	profileName: string;
+          	profileDescription?: string;
+          	message: string;
+          	status: CodexSubagentStatus;
+          	finalOutput: string;
+          	stderr: string;
+          	error?: string;
+          	model?: string;
+          	effort?: string;
+          	tools: "none" | string[];
+          	cwd: string;
+          	usage: CodexUsage;
+          	activities: CodexActivity[];
+          	startedAt: number;
+          	updatedAt: number;
+          	completedAt?: number;
+          }
+
+          export interface CodexSubagentDetails {
+          	action: CodexSubagentAction;
+          	snapshots: CodexSnapshot[];
+          	timedOut?: boolean;
+          	message?: string;
+          	previousSnapshot?: CodexSnapshot;
+          }
+
+          interface ToolResultBlock {
+          	type?: unknown;
+          	text?: unknown;
+          }
+
+          interface ToolResultLike {
+          	content?: unknown;
+          	details?: unknown;
+          	isError?: unknown;
+          }
+
+          export interface CodexSubagentToolComponentLike {
+          	toolName?: unknown;
+          	args?: unknown;
+          	result?: unknown;
+          	expanded?: unknown;
+          	isPartial?: unknown;
+          	executionStarted?: unknown;
+          }
+
+          interface WireStatus {
+          	status: CodexSubagentStatus;
+          	label: string;
+          	output?: string;
+          }
+
+          function finiteNumber(value: unknown): number | undefined {
+          	return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+          }
+
+          function numberOrZero(value: unknown): number {
+          	return finiteNumber(value) ?? 0;
+          }
+
+          function optionalString(value: unknown): string | undefined {
+          	return typeof value === "string" && value.length > 0 ? value : undefined;
+          }
+
+          function firstString(...values: unknown[]): string | undefined {
+          	for (const value of values) {
+          		const text = optionalString(value);
+          		if (text !== undefined) return text;
+          	}
+          	return undefined;
+          }
+
+          function parseStatus(value: unknown): CodexSubagentStatus | undefined {
+          	if (isObject(value)) {
+          		if (Object.prototype.hasOwnProperty.call(value, "completed")) return "completed";
+          		if (typeof value.errored === "string") return "errored";
+          		return undefined;
+          	}
+          	switch (value) {
+          		case "pending_init":
+          		case "starting":
+          			return "starting";
+          		case "running":
+          			return "running";
+          		case "completed":
+          			return "completed";
+          		case "errored":
+          			return "errored";
+          		case "interrupted":
+          			return "interrupted";
+          		case "shutdown":
+          		case "closed":
+          		case "not_found":
+          			return "closed";
+          		default:
+          			return undefined;
+          	}
+          }
+
+          function parseActivityStatus(value: unknown): CodexActivityStatus | undefined {
+          	return value === "running" || value === "completed" || value === "errored" ? value : undefined;
+          }
+
+          function parseUsage(value: unknown): CodexUsage {
+          	const record = isObject(value) ? value : {};
+          	return {
+          		input: numberOrZero(record.input ?? record.input_tokens),
+          		output: numberOrZero(record.output ?? record.output_tokens),
+          		cacheRead: numberOrZero(record.cacheRead ?? record.cache_read ?? record.cache_read_tokens),
+          		cacheWrite: numberOrZero(record.cacheWrite ?? record.cache_write ?? record.cache_write_tokens),
+          		cost: numberOrZero(record.cost),
+          		turns: numberOrZero(record.turns),
+          	};
+          }
+
+          function parseActivity(value: unknown, index: number): CodexActivity | undefined {
+          	if (!isObject(value)) return undefined;
+          	const kind = value.kind;
+          	const status = parseActivityStatus(value.status);
+          	const name = firstString(value.name, value.tool_name);
+          	if ((kind !== "tool" && kind !== "message" && kind !== "system") || !status || !name) return undefined;
+          	const startedAt = finiteNumber(value.startedAt ?? value.started_at) ?? Date.now();
+          	const endedAt = finiteNumber(value.endedAt ?? value.ended_at);
+          	return {
+          		id: firstString(value.id) ?? `activity_${index}`,
+          		kind,
+          		name,
+          		summary: firstString(value.summary, value.detail) ?? name,
+          		status,
+          		startedAt,
+          		...(endedAt !== undefined ? { endedAt } : {}),
+          	};
+          }
+
+          function wireStatus(value: unknown): WireStatus | undefined {
+          	if (isObject(value)) {
+          		if (Object.prototype.hasOwnProperty.call(value, "completed")) {
+          			const output = typeof value.completed === "string" ? value.completed : undefined;
+          			return { status: "completed", label: "Done", ...(output ? { output } : {}) };
+          		}
+          		if (typeof value.errored === "string") {
+          			return { status: "errored", label: `Failed: ${firstLine(value.errored)}`, output: value.errored };
+          		}
+          		return undefined;
+          	}
+          	switch (value) {
+          		case "pending_init":
+          		case "starting":
+          			return { status: "starting", label: "Initializing…" };
+          		case "running":
+          			return { status: "running", label: "Running…" };
+          		case "interrupted":
+          			return { status: "interrupted", label: "Interrupted" };
+          		case "shutdown":
+          		case "closed":
+          			return { status: "closed", label: "Stopped" };
+          		case "not_found":
+          			return { status: "errored", label: "Not found" };
+          		case "completed":
+          			return { status: "completed", label: "Done" };
+          		case "errored":
+          			return { status: "errored", label: "Failed" };
+          		default:
+          			return undefined;
+          	}
+          }
+
+          function parseSnapshot(value: unknown, fallbackId?: string): CodexSnapshot | undefined {
+          	if (!isObject(value)) return undefined;
+          	const id = firstString(value.id, value.agent_id, fallbackId);
+          	const statusValue = value.status ?? value.agent_status;
+          	const status = parseStatus(statusValue);
+          	if (!id || !status) return undefined;
+          	const rawActivities = Array.isArray(value.activities) ? value.activities : [];
+          	const activities = rawActivities
+          		.map((item, index) => parseActivity(item, index))
+          		.filter((item): item is CodexActivity => item !== undefined);
+          	const tools = value.tools === "none"
+          		? "none"
+          		: Array.isArray(value.tools)
+          			? value.tools.filter((item): item is string => typeof item === "string")
+          			: [];
+          	const statusInfo = wireStatus(statusValue);
+          	const startedAt = finiteNumber(value.startedAt ?? value.started_at) ?? Date.now();
+          	const updatedAt = finiteNumber(value.updatedAt ?? value.updated_at) ?? startedAt;
+          	const completedAt = finiteNumber(value.completedAt ?? value.completed_at);
+          	return {
+          		id,
+          		taskName: firstString(value.taskName, value.task_name, value.agent_name, value.nickname) ?? id,
+          		profileName: firstString(value.profileName, value.profile_name, value.agent_type) ?? "agent",
+          		...(firstString(value.profileDescription, value.profile_description)
+          			? { profileDescription: firstString(value.profileDescription, value.profile_description) }
+          			: {}),
+          		message: firstString(value.message, value.prompt) ?? "",
+          		status,
+          		finalOutput: firstString(value.finalOutput, value.final_output, statusInfo?.output) ?? "",
+          		stderr: firstString(value.stderr) ?? "",
+          		...(firstString(value.error) ? { error: firstString(value.error) } : {}),
+          		...(firstString(value.model) ? { model: firstString(value.model) } : {}),
+          		...(firstString(value.effort, value.reasoning_effort) ? { effort: firstString(value.effort, value.reasoning_effort) } : {}),
+          		tools,
+          		cwd: firstString(value.cwd) ?? "",
+          		usage: parseUsage(value.usage),
+          		activities,
+          		startedAt,
+          		updatedAt,
+          		...(completedAt !== undefined ? { completedAt } : {}),
+          	};
+          }
+
+          function resultRecord(value: unknown): ToolResultLike | undefined {
+          	return isObject(value) ? value : undefined;
+          }
+
+          function parseRichDetails(result: unknown, expectedAction: CodexSubagentAction): CodexSubagentDetails | undefined {
+          	const details = resultRecord(result)?.details;
+          	if (!isObject(details) || details.action !== expectedAction || !Array.isArray(details.snapshots)) return undefined;
+          	const snapshots = details.snapshots
+          		.map((item) => parseSnapshot(item))
+          		.filter((item): item is CodexSnapshot => item !== undefined);
+          	if (snapshots.length !== details.snapshots.length) return undefined;
+          	const previousSnapshot = details.previousSnapshot === undefined
+          		? undefined
+          		: parseSnapshot(details.previousSnapshot);
+          	if (details.previousSnapshot !== undefined && !previousSnapshot) return undefined;
+          	return {
+          		action: expectedAction,
+          		snapshots,
+          		...(typeof details.timedOut === "boolean" ? { timedOut: details.timedOut } : {}),
+          		...(typeof details.message === "string" ? { message: details.message } : {}),
+          		...(previousSnapshot ? { previousSnapshot } : {}),
+          	};
+          }
+
+          function textContent(result: unknown): string {
+          	const content = resultRecord(result)?.content;
+          	if (!Array.isArray(content)) return "";
+          	return content
+          		.filter((block): block is ToolResultBlock => isObject(block))
+          		.filter((block) => block.type === "text" && typeof block.text === "string")
+          		.map((block) => String(block.text))
+          		.join("\n")
+          		.trim();
+          }
+
+          function parseJsonResult(result: unknown): Record<string, unknown> | undefined {
+          	const text = textContent(result);
+          	if (!text) return undefined;
+          	try {
+          		const parsed: unknown = JSON.parse(text);
+          		return isObject(parsed) ? parsed : undefined;
+          	} catch {
+          		return undefined;
+          	}
+          }
+
+          export function identifyCodexSubagentTool(toolName: unknown): CodexSubagentAction | undefined {
+          	const normalized = asString(toolName)?.toLowerCase();
+          	if (!normalized || !Object.prototype.hasOwnProperty.call(TOOL_ACTIONS, normalized)) return undefined;
+          	return TOOL_ACTIONS[normalized as keyof typeof TOOL_ACTIONS];
+          }
+
+          export function isCodexSubagentToolName(toolName: unknown): boolean {
+          	return identifyCodexSubagentTool(toolName) !== undefined;
+          }
+
+          function matchesArguments(action: CodexSubagentAction, value: unknown): boolean {
+          	const args = isObject(value) ? value : {};
+          	switch (action) {
+          		case "spawn":
+          			return typeof args.message === "string";
+          		case "send":
+          			return typeof args.target === "string"
+          				&& (typeof args.message === "string" || Array.isArray(args.items));
+          		case "wait":
+          			return args.ids === undefined
+          				|| (Array.isArray(args.ids) && args.ids.every((item) => typeof item === "string"));
+          		case "close":
+          			return typeof args.target === "string";
+          		case "list":
+          			return value === undefined || isObject(value);
+          	}
+          }
+
+          function formatCount(value: number): string {
+          	if (value < 1_000) return String(Math.round(value));
+          	if (value < 10_000) return `${(value / 1_000).toFixed(1)}k`;
+          	if (value < 1_000_000) return `${Math.round(value / 1_000)}k`;
+          	return `${(value / 1_000_000).toFixed(1)}m`;
+          }
+
+          export function formatCodexSubagentDuration(milliseconds: number): string {
+          	const seconds = Math.max(0, Math.round(milliseconds / 1_000));
+          	if (seconds < 60) return `${seconds}s`;
+          	const minutes = Math.floor(seconds / 60);
+          	const rest = seconds % 60;
+          	if (minutes < 60) return rest ? `${minutes}m ${rest}s` : `${minutes}m`;
+          	const hours = Math.floor(minutes / 60);
+          	const minuteRest = minutes % 60;
+          	return minuteRest ? `${hours}h ${minuteRest}m` : `${hours}h`;
+          }
+
+          function firstLine(value: string, max = 140): string {
+          	const line = value.replace(/\s+/g, " ").trim();
+          	if (!line) return "";
+          	return line.length > max ? `${line.slice(0, max - 1)}…` : line;
+          }
+
+          function friendlyToolName(name: string): string {
+          	const known: Record<string, string> = {
+          		read: "Read",
+          		write: "Write",
+          		edit: "Edit",
+          		grep: "Grep",
+          		find: "Find",
+          		ls: "List",
+          		bash: "Bash",
+          		shell_command: "Shell",
+          		powershell: "PowerShell",
+          		apply_patch: "Update",
+          		web_search: "WebSearch",
+          	};
+          	return known[name] ?? name;
+          }
+
+          function formatActivity(activity: CodexActivity): string {
+          	const name = friendlyToolName(activity.name);
+          	return activity.summary && activity.summary !== activity.name ? `${name}(${activity.summary})` : name;
+          }
+
+          function statusColor(status: CodexSubagentStatus): "success" | "error" | "warning" | "dim" | "muted" | "accent" {
+          	switch (status) {
+          		case "completed": return "success";
+          		case "errored": return "error";
+          		case "interrupted": return "warning";
+          		case "closed": return "dim";
+          		case "starting": return "muted";
+          		case "running": return "accent";
+          	}
+          }
+
+          function statusGlyph(status: CodexSubagentStatus): string {
+          	if (status === "starting" || status === "closed") return "○";
+          	if (status === "running") return "✻";
+          	return "●";
+          }
+
+          function summaryParts(snapshot: CodexSnapshot, config: SubagentRenderingConfig): string[] {
+          	const parts: string[] = [];
+          	if (config.showToolActivity) {
+          		const uses = snapshot.activities.filter((item) => item.kind === "tool").length;
+          		if (uses > 0) parts.push(`${uses} tool use${uses === 1 ? "" : "s"}`);
+          	}
+          	if (config.showUsage) {
+          		const total = snapshot.usage.input + snapshot.usage.output;
+          		if (total > 0) parts.push(`${formatCount(total)} tokens`);
+          	}
+          	if (config.showElapsed) parts.push(formatCodexSubagentDuration((snapshot.completedAt ?? Date.now()) - snapshot.startedAt));
+          	return parts;
+          }
+
+          function detailedUsage(snapshot: CodexSnapshot): string {
+          	const parts: string[] = [];
+          	if (snapshot.usage.turns) parts.push(`${snapshot.usage.turns} turn${snapshot.usage.turns === 1 ? "" : "s"}`);
+          	if (snapshot.usage.input) parts.push(`↑${formatCount(snapshot.usage.input)}`);
+          	if (snapshot.usage.output) parts.push(`↓${formatCount(snapshot.usage.output)}`);
+          	if (snapshot.usage.cacheRead) parts.push(`R${formatCount(snapshot.usage.cacheRead)}`);
+          	if (snapshot.usage.cacheWrite) parts.push(`W${formatCount(snapshot.usage.cacheWrite)}`);
+          	if (snapshot.usage.cost) parts.push(`$${snapshot.usage.cost.toFixed(4)}`);
+          	return parts.join(" · ");
+          }
+
+          function lastToolActivity(snapshot: CodexSnapshot): CodexActivity | undefined {
+          	for (let index = snapshot.activities.length - 1; index >= 0; index--) {
+          		const activity = snapshot.activities[index];
+          		if (activity?.kind === "tool") return activity;
+          	}
+          	return undefined;
+          }
+
+          function currentActivity(snapshot: CodexSnapshot, previous?: CodexSnapshot): string {
+          	if (snapshot.status === "closed" && previous) return `Stopped · was ${previous.status}`;
+          	switch (snapshot.status) {
+          		case "starting": return "Initializing…";
+          		case "running": {
+          			const activity = lastToolActivity(snapshot);
+          			return activity ? formatActivity(activity) : "Running…";
+          		}
+          		case "completed": return "Done";
+          		case "errored": return snapshot.error ? `Failed: ${firstLine(snapshot.error)}` : "Failed";
+          		case "interrupted": return "Interrupted";
+          		case "closed": return "Stopped";
+          	}
+          }
+
+          function header(action: CodexSubagentAction, argsValue: unknown, theme: Theme): Text {
+          	const args = isObject(argsValue) ? argsValue : {};
+          	const dot = theme.fg("accent", "● ");
+          	if (action === "spawn") {
+          		const profile = firstString(args.agent_type) ?? "agent";
+          		const task = firstString(args.task_name) ?? "subagent";
+          		return new Text(dot + theme.fg("toolTitle", theme.bold(profile)) + theme.fg("muted", " (") + theme.fg("text", task) + theme.fg("muted", ")"), 0, 0);
+          	}
+          	if (action === "send") return new Text(dot + theme.fg("toolTitle", theme.bold("Message")) + theme.fg("muted", ` (${String(args.target ?? "subagent")})`), 0, 0);
+          	if (action === "close") return new Text(dot + theme.fg("toolTitle", theme.bold("Stop")) + theme.fg("muted", ` (${String(args.target ?? "subagent")})`), 0, 0);
+          	if (action === "wait") {
+          		const ids = Array.isArray(args.ids) ? args.ids.filter((item): item is string => typeof item === "string") : [];
+          		const target = ids.length <= 2 ? ids.join(", ") : `${ids.slice(0, 2).join(", ")} +${ids.length - 2}`;
+          		return new Text(dot + theme.fg("toolTitle", theme.bold("Wait")) + (target ? theme.fg("muted", ` (${target})`) : ""), 0, 0);
+          	}
+          	return new Text(dot + theme.fg("toolTitle", theme.bold("Subagents")), 0, 0);
+          }
+
+          function identity(snapshot: CodexSnapshot, theme: Theme): string {
+          	return theme.fg("toolTitle", theme.bold(snapshot.profileName))
+          		+ theme.fg("muted", " (")
+          		+ theme.fg("text", snapshot.taskName)
+          		+ theme.fg("muted", ")");
+          }
+
+          function addProgress(container: Container, snapshot: CodexSnapshot, theme: Theme, config: SubagentRenderingConfig): void {
+          	if (!config.showToolActivity || snapshot.activities.length === 0) return;
+          	const visible = snapshot.activities.slice(-config.expandedActivityItems);
+          	const hidden = snapshot.activities.length - visible.length;
+          	container.addChild(new Spacer(1));
+          	container.addChild(new Text(theme.fg("dim", theme.bold("     Progress")), 0, 0));
+          	if (hidden > 0) container.addChild(new Text(theme.fg("dim", `       … +${hidden} earlier activit${hidden === 1 ? "y" : "ies"}`), 0, 0));
+          	for (let index = 0; index < visible.length; index++) {
+          		const activity = visible[index]!;
+          		const latest = index === visible.length - 1;
+          		const color = activity.status === "errored" ? "error" : latest && activity.status === "running" ? "text" : "dim";
+          		const elapsed = activity.endedAt ? ` · ${formatCodexSubagentDuration(activity.endedAt - activity.startedAt)}` : "";
+          		container.addChild(new Text(theme.fg("dim", `     ${latest ? "› " : "  "}`) + theme.fg(color, formatActivity(activity)) + theme.fg("dim", elapsed), 0, 0));
+          	}
+          }
+
+          function addMetadata(container: Container, snapshot: CodexSnapshot, theme: Theme): void {
+          	const tools = snapshot.tools === "none" ? "none" : snapshot.tools.join(", ") || "none";
+          	const settings = [
+          		snapshot.model ? `model: ${snapshot.model}` : "model: default",
+          		snapshot.effort ? `effort: ${snapshot.effort}` : "effort: default",
+          		`tools: ${tools}`,
+          		`cwd: ${snapshot.cwd || "."}`,
+          	].join(" · ");
+          	container.addChild(new Spacer(1));
+          	container.addChild(new Text(theme.fg("dim", theme.bold("     Configuration")), 0, 0));
+          	container.addChild(new Text(theme.fg("dim", `       ${settings}`), 0, 0));
+          	const usage = detailedUsage(snapshot);
+          	if (usage) container.addChild(new Text(theme.fg("dim", `       usage: ${usage}`), 0, 0));
+          }
+
+          function addMarkdown(container: Container, title: string, content: string, theme: Theme, error = false): void {
+          	if (!content.trim()) return;
+          	container.addChild(new Spacer(1));
+          	container.addChild(new Text(theme.fg(error ? "error" : "dim", theme.bold(`     ${title}`)), 0, 0));
+          	container.addChild(new Markdown(content, 7, 0, getMarkdownTheme()));
+          }
+
+          function hasDetails(snapshot: CodexSnapshot): boolean {
+          	return Boolean(snapshot.profileDescription || snapshot.message || snapshot.model || snapshot.effort || snapshot.activities.length || snapshot.finalOutput || snapshot.error || snapshot.stderr);
+          }
+
+          function snapshotComponent(snapshot: CodexSnapshot, expanded: boolean, includeTitle: boolean, isLast: boolean, theme: Theme, config: SubagentRenderingConfig, previous?: CodexSnapshot): Container {
+          	const container = new Container();
+          	const stats = summaryParts(snapshot, config);
+          	if (includeTitle) {
+          		container.addChild(new Text(theme.fg("dim", `${isLast ? "└─" : "├─"} `) + identity(snapshot, theme) + (stats.length ? theme.fg("dim", ` · ${stats.join(" · ")}`) : ""), 0, 0));
+          		container.addChild(new Text(theme.fg("dim", isLast ? "   ⎿  " : "│  ⎿  ") + theme.fg(statusColor(snapshot.status), `${statusGlyph(snapshot.status)} ${currentActivity(snapshot, previous)}`), 0, 0));
+          	} else {
+          		container.addChild(new Text(theme.fg("dim", "  ⎿  ") + theme.fg(statusColor(snapshot.status), `${statusGlyph(snapshot.status)} ${currentActivity(snapshot, previous)}`) + (stats.length ? theme.fg("dim", ` (${stats.join(" · ")})`) : ""), 0, 0));
+          	}
+          	if (!expanded) {
+          		if (snapshot.status === "running" && config.showToolActivity) {
+          			const recent = snapshot.activities.filter((item) => item.kind === "tool").slice(-Math.max(0, config.collapsedActivityItems - 1) - 1, -1);
+          			for (const activity of recent) container.addChild(new Text(theme.fg("dim", `     ${formatActivity(activity)}`), 0, 0));
+          		}
+          		return container;
+          	}
+          	if (snapshot.profileDescription) container.addChild(new Text(theme.fg("dim", `     ${snapshot.profileDescription}`), 0, 0));
+          	addProgress(container, snapshot, theme, config);
+          	addMetadata(container, snapshot, theme);
+          	addMarkdown(container, "Prompt", snapshot.message, theme);
+          	if (snapshot.error) addMarkdown(container, "Error", snapshot.error, theme, true);
+          	else addMarkdown(container, "Response", snapshot.finalOutput, theme);
+          	addMarkdown(container, "Process log", snapshot.stderr, theme, true);
+          	return container;
+          }
+
+          function richResult(details: CodexSubagentDetails, expanded: boolean, isPartial: boolean, theme: Theme, config: SubagentRenderingConfig): Container {
+          	const container = new Container();
+          	if (details.message) container.addChild(new Text(theme.fg("error", `  ⎿  ${details.message}`), 0, 0));
+          	if (details.snapshots.length === 0) {
+          		if (!details.message) container.addChild(new Text(theme.fg("dim", "  ⎿  No subagents"), 0, 0));
+          		return container;
+          	}
+          	const includeTitle = details.action === "wait" || details.action === "list" || details.snapshots.length > 1;
+          	for (let index = 0; index < details.snapshots.length; index++) {
+          		if (index > 0 && expanded) container.addChild(new Spacer(1));
+          		container.addChild(snapshotComponent(details.snapshots[index]!, expanded, includeTitle, index === details.snapshots.length - 1, theme, config, details.action === "close" ? details.previousSnapshot : undefined));
+          	}
+          	if (details.timedOut) container.addChild(new Text(theme.fg("warning", "  ⎿  Wait timed out · agents are still running"), 0, 0));
+          	else if (isPartial && details.action === "wait") container.addChild(new Text(theme.fg("dim", "  ⎿  Waiting for an agent update…"), 0, 0));
+          	if (!expanded && config.showExpandHint && details.snapshots.some(hasDetails)) container.addChild(new Text(theme.fg("dim", "     Ctrl+O to expand details"), 0, 0));
+          	return container;
+          }
+
+          function pendingLabel(action: CodexSubagentAction): string {
+          	switch (action) {
+          		case "spawn": return "Starting agent…";
+          		case "send": return "Sending message…";
+          		case "wait": return "Waiting for agent update…";
+          		case "close": return "Stopping agent…";
+          		case "list": return "Listing agents…";
+          	}
+          }
+
+          function treeLine(label: string, status: WireStatus, last: boolean, theme: Theme): string[] {
+          	return [
+          		theme.fg("dim", `${last ? "└─" : "├─"} `) + theme.fg("text", label),
+          		theme.fg("dim", last ? "   ⎿  " : "│  ⎿  ") + theme.fg(statusColor(status.status), `${statusGlyph(status.status)} ${status.label}`),
+          	];
+          }
+
+          function fallbackResult(action: CodexSubagentAction, result: unknown, isPartial: boolean, theme: Theme): Container | undefined {
+          	const container = new Container();
+          	const resultValue = resultRecord(result);
+          	if (result === undefined || isPartial) {
+          		container.addChild(new Text(theme.fg("dim", `  ⎿  ${pendingLabel(action)}`), 0, 0));
+          		return container;
+          	}
+          	const rawText = textContent(result);
+          	if (resultValue?.isError === true) {
+          		container.addChild(new Text(theme.fg("error", `  ⎿  ${firstLine(rawText || "Subagent tool failed")}`), 0, 0));
+          		return container;
+          	}
+          	const payload = parseJsonResult(result);
+          	if (!payload) return undefined;
+
+          	if (action === "spawn") {
+          		const id = firstString(payload.agent_id);
+          		if (!id) return undefined;
+          		const nickname = firstString(payload.nickname);
+          		container.addChild(new Text(theme.fg("success", `  ⎿  ● Started ${nickname ?? id}`) + (nickname ? theme.fg("dim", ` · ${id}`) : ""), 0, 0));
+          		return container;
+          	}
+          	if (action === "send") {
+          		const id = firstString(payload.submission_id);
+          		if (!id) return undefined;
+          		container.addChild(new Text(theme.fg("success", "  ⎿  ● Message queued") + theme.fg("dim", ` · ${id}`), 0, 0));
+          		return container;
+          	}
+          	if (action === "close") {
+          		const previous = wireStatus(payload.previous_status);
+          		if (!previous) return undefined;
+          		container.addChild(new Text(theme.fg("dim", `  ⎿  ○ Stopped · was ${previous.label}`), 0, 0));
+          		return container;
+          	}
+          	if (action === "wait") {
+          		if (!isObject(payload.status)) return undefined;
+          		const entries = Object.entries(payload.status);
+          		if (entries.length === 0) {
+          			const timedOut = payload.timed_out === true;
+          			container.addChild(new Text(theme.fg(timedOut ? "warning" : "dim", `  ⎿  ${timedOut ? "Wait timed out" : "No agent updates"}`), 0, 0));
+          			return container;
+          		}
+          		for (let index = 0; index < entries.length; index++) {
+          			const [name, value] = entries[index]!;
+          			const status = wireStatus(value);
+          			if (!status) return undefined;
+          			for (const line of treeLine(name, status, index === entries.length - 1, theme)) container.addChild(new Text(line, 0, 0));
+          		}
+          		return container;
+          	}
+          	if (!Array.isArray(payload.agents)) return undefined;
+          	if (payload.agents.length === 0) {
+          		container.addChild(new Text(theme.fg("dim", "  ⎿  No subagents"), 0, 0));
+          		return container;
+          	}
+          	for (let index = 0; index < payload.agents.length; index++) {
+          		const agent = payload.agents[index];
+          		if (!isObject(agent)) return undefined;
+          		const name = firstString(agent.agent_name, agent.task_name, agent.nickname, agent.agent_id, agent.id);
+          		const status = wireStatus(agent.agent_status ?? agent.status);
+          		if (!name || !status) return undefined;
+          		const uses = finiteNumber(agent.tool_uses);
+          		const decorated = uses && uses > 0 ? `${name} · ${uses} tool use${uses === 1 ? "" : "s"}` : name;
+          		for (const line of treeLine(decorated, status, index === payload.agents.length - 1, theme)) container.addChild(new Text(line, 0, 0));
+          	}
+          	return container;
+          }
+
+          export function renderCodexSubagentTool(
+          	tool: CodexSubagentToolComponentLike,
+          	theme: Theme,
+          	width: number,
+          	config: SubagentRenderingConfig,
+          ): string[] | undefined {
+          	const action = identifyCodexSubagentTool(tool.toolName);
+          	if (!action || !config.enabled || !matchesArguments(action, tool.args)) return undefined;
+          	const container = new Container();
+          	container.addChild(header(action, tool.args, theme));
+          	const rich = parseRichDetails(tool.result, action);
+          	if (rich) {
+          		container.addChild(richResult(rich, tool.expanded === true, tool.isPartial === true, theme, config));
+          	} else {
+          		const fallback = fallbackResult(action, tool.result, tool.isPartial === true, theme);
+          		if (!fallback) return undefined;
+          		container.addChild(fallback);
+          	}
+          	return ["", ...container.render(Math.max(1, width))];
+          }
+          TS
+
+          rm -f extensions/open-tui/subagent-tool-renderer.ts
+
+          python <<'PY'
+          from pathlib import Path
+          import json
+          import re
+          import shutil
+
+          root = Path.cwd()
+
+          renderer_path = root / "extensions/open-tui/claude-tool-renderer.ts"
+          renderer = renderer_path.read_text(encoding="utf-8")
+          renderer = renderer.replace('./subagent-tool-renderer.ts', './codex-subagent-renderer.ts')
+          renderer = renderer.replace('isSimpleSubagentToolName', 'isCodexSubagentToolName')
+          renderer = renderer.replace('renderSimpleSubagentTool', 'renderCodexSubagentTool')
+          renderer_path.write_text(renderer, encoding="utf-8")
+
+          package_path = root / "package.json"
+          package = json.loads(package_path.read_text(encoding="utf-8"))
+          package["scripts"]["test"] = package["scripts"]["test"].replace(
+              "tests/subagent-rendering.test.ts",
+              "tests/codex-subagent-rendering.test.ts",
+          )
+          package_path.write_text(json.dumps(package, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+          old_test = root / "tests/subagent-rendering.test.ts"
+          if old_test.exists():
+              old_test.unlink()
+
+          def generic_docs(path: str) -> None:
+              file = root / path
+              text = file.read_text(encoding="utf-8")
+              replacements = {
+                  "- 接管 `pi-simple-subagent` 的五个编排工具，显示 Claude Code 风格的代理状态、活动树、Token、耗时和展开详情。": "- 识别 Codex 风格的 `spawn_agent`、`send_input`、`wait_agent`、`close_agent`、`list_agents`，并显示 Claude Code 风格的代理状态、活动树、Token、耗时和展开详情。",
+                  "`pi-open-tui` renders Pi built-in tools, MCP tools, `shell_command`, `apply_patch`, common OpenAI-style web/task/context tools, and `pi-simple-subagent` orchestration tools with a shared Claude-style presentation.": "`pi-open-tui` renders Pi built-in tools, MCP tools, `shell_command`, `apply_patch`, common OpenAI-style web/task/context tools, and Codex-style Subagent tools with a shared Claude-style presentation.",
+                  "- `pi-simple-subagent` snapshots render as Claude-style single-agent status rows or multi-agent trees with activity, token, elapsed, prompt, response, and error details.": "- Codex-style Subagent results render as Claude-style single-agent status rows or multi-agent trees with activity, token, elapsed, prompt, response, and error details when those fields are available.",
+              }
+              for old, new in replacements.items():
+                  text = text.replace(old, new)
+              text = re.sub(
+                  r'Subagent rendering consumes the versioned `details\.kind = "pi-simple-subagent"` protocol and temporarily accepts the legacy unmarked shape so `pi-open-tui` can be upgraded before `pi-simple-subagent`\.',
+                  'Subagent rendering is selected by the exact Codex tool names and validated argument/result shapes. Standard JSON results work without private metadata; optional unbranded snapshot details only enrich progress and expanded views.',
+                  text,
+              )
+              text = text.replace('`pi-simple-subagent`', 'Codex-style Subagent tools')
+              text = text.replace('pi-simple-subagent', 'Codex-style Subagent implementation')
+              file.write_text(text, encoding="utf-8")
+
+          generic_docs("README.md")
+          generic_docs("docs/claude-tool-rendering.md")
+
+          migration = root / ".migration"
+          if migration.exists():
+              shutil.rmtree(migration)
+          workflows = root / ".github" / "workflows"
+          for file in workflows.glob("*.yml"):
+              if file.name != "validate.yml":
+                  file.unlink()
+          for file in workflows.glob("*.yaml"):
+              file.unlink()
+
+          assert "pi-simple-subagent" not in (root / "README.md").read_text(encoding="utf-8")
+          assert "pi-simple-subagent" not in (root / "docs/claude-tool-rendering.md").read_text(encoding="utf-8")
+          assert "SimpleSubagent" not in (root / "extensions/open-tui/codex-subagent-renderer.ts").read_text(encoding="utf-8")
+          assert "details.kind" not in (root / "extensions/open-tui/codex-subagent-renderer.ts").read_text(encoding="utf-8")
+          assert "pi-simple-subagent" not in (root / "extensions/open-tui/codex-subagent-renderer.ts").read_text(encoding="utf-8")
+          PY
+
+          cat > tests/codex-subagent-rendering.test.ts <<'TS'
+          import assert from "node:assert/strict";
+          import test from "node:test";
+          import type { Theme } from "@earendil-works/pi-coding-agent";
+          import { installClaudeToolRenderer } from "../extensions/open-tui/claude-tool-renderer.ts";
+          import {
+          	identifyCodexSubagentTool,
+          	isCodexSubagentToolName,
+          	renderCodexSubagentTool,
+          } from "../extensions/open-tui/codex-subagent-renderer.ts";
+          import { DEFAULT_TOOL_RENDERING_CONFIG } from "../extensions/open-tui/config.ts";
+
+          const theme = {
+          	bold: (text: string) => text,
+          	italic: (text: string) => text,
+          	fg: (_name: string, text: string) => text,
+          } as unknown as Theme;
+
+          const config = DEFAULT_TOOL_RENDERING_CONFIG.subagents;
+
+          function jsonResult(payload: unknown, details?: unknown) {
+          	return {
+          		isError: false,
+          		content: [{ type: "text", text: JSON.stringify(payload) }],
+          		...(details === undefined ? {} : { details }),
+          	};
+          }
+
+          function tool(overrides: Record<string, unknown> = {}) {
+          	return {
+          		toolName: "spawn_agent",
+          		args: { task_name: "inspect_api", message: "Inspect src/api", agent_type: "explorer" },
+          		result: jsonResult({ agent_id: "agent_1", nickname: "inspect_api" }),
+          		expanded: false,
+          		isPartial: false,
+          		executionStarted: true,
+          		ui: { requestRender() {} },
+          		...overrides,
+          	};
+          }
+
+          function plain(lines: string[] | undefined): string {
+          	return (lines ?? []).join("\n");
+          }
+
+          test("matches the exact Codex-style tool family rather than a plugin brand", () => {
+          	assert.equal(identifyCodexSubagentTool("spawn_agent"), "spawn");
+          	assert.equal(identifyCodexSubagentTool("send_input"), "send");
+          	assert.equal(identifyCodexSubagentTool("wait_agent"), "wait");
+          	assert.equal(identifyCodexSubagentTool("close_agent"), "close");
+          	assert.equal(identifyCodexSubagentTool("list_agents"), "list");
+          	assert.equal(isCodexSubagentToolName("spawn_agent_extra"), false);
+          });
+
+          test("renders a standard Codex spawn result with no details metadata", () => {
+          	const rendered = plain(renderCodexSubagentTool(tool(), theme, 120, config));
+          	assert.match(rendered, /● explorer \(inspect_api\)/);
+          	assert.match(rendered, /Started inspect_api/);
+          	assert.match(rendered, /agent_1/);
+          });
+
+          test("renders standard Codex wait statuses as a Claude-style task tree", () => {
+          	const rendered = plain(renderCodexSubagentTool(tool({
+          		toolName: "wait_agent",
+          		args: { ids: ["inspect_api", "review_tests"], timeout_ms: 1000 },
+          		result: jsonResult({
+          			status: {
+          				inspect_api: { completed: "Found two issues" },
+          				review_tests: "running",
+          			},
+          		}),
+          	}), theme, 120, config));
+          	assert.match(rendered, /├─ inspect_api/);
+          	assert.match(rendered, /● Done/);
+          	assert.match(rendered, /└─ review_tests/);
+          	assert.match(rendered, /✻ Running/);
+          });
+
+          test("uses optional unbranded snapshots only as a richer structural view", () => {
+          	const now = Date.now();
+          	const details = {
+          		action: "spawn",
+          		snapshots: [{
+          			id: "agent_1",
+          			taskName: "inspect_api",
+          			profileName: "explorer",
+          			message: "Inspect src/api",
+          			status: "running",
+          			finalOutput: "",
+          			stderr: "",
+          			model: "openai/gpt-test",
+          			effort: "high",
+          			tools: ["read", "grep"],
+          			cwd: "/repo",
+          			usage: { input: 100, output: 20, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 1 },
+          			activities: [
+          				{ id: "a1", kind: "tool", name: "grep", summary: "/authorize/ in src", status: "completed", startedAt: now - 2000, endedAt: now - 1000 },
+          				{ id: "a2", kind: "tool", name: "read", summary: "src/auth.ts", status: "running", startedAt: now - 500 },
+          			],
+          			startedAt: now - 5000,
+          			updatedAt: now,
+          		}],
+          	};
+          	assert.equal("kind" in details, false);
+          	assert.equal("version" in details, false);
+          	const rendered = plain(renderCodexSubagentTool(tool({
+          		result: jsonResult({ agent_id: "agent_1", nickname: "inspect_api" }, details),
+          	}), theme, 160, config));
+          	assert.match(rendered, /Read\(src\/auth\.ts\)/);
+          	assert.match(rendered, /2 tool uses/);
+          	assert.match(rendered, /120 tokens/);
+          	assert.match(rendered, /Ctrl\+O to expand details/);
+          });
+
+          test("falls back to Pi for malformed output or when Subagent rendering is disabled", () => {
+          	const prototype = {
+          		render(): string[] {
+          			return ["ORIGINAL"];
+          		},
+          	};
+          	const cleanup = installClaudeToolRenderer(() => theme, {
+          		prototype,
+          		getConfig: () => DEFAULT_TOOL_RENDERING_CONFIG,
+          	});
+          	try {
+          		assert.doesNotMatch(plain(prototype.render.call(tool(), 120)), /ORIGINAL/);
+          		assert.equal(plain(prototype.render.call(tool({ result: jsonResult({ wrong: true }) }), 120)), "ORIGINAL");
+          	} finally {
+          		cleanup();
+          	}
+
+          	const disabledPrototype = { render: () => ["ORIGINAL"] };
+          	const cleanupDisabled = installClaudeToolRenderer(() => theme, {
+          		prototype: disabledPrototype,
+          		getConfig: () => ({
+          			...DEFAULT_TOOL_RENDERING_CONFIG,
+          			subagents: { ...config, enabled: false },
+          		}),
+          	});
+          	try {
+          		assert.equal(plain(disabledPrototype.render.call(tool(), 120)), "ORIGINAL");
+          	} finally {
+          		cleanupDisabled();
+          	}
+          });
+          TS
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Test
+        run: npm test
+      - name: Replace the PR branch with one clean commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git reset --soft origin/main
+          git add -A
+          git commit -m "feat: render Codex-style Subagent tools"
+          git push --force origin HEAD:feat/subagent-rendering
