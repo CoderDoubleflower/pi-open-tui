@@ -154,6 +154,25 @@ test("configures every tool rendering option inside /open-tui", async () => {
 	assert.equal(settings.getConfig().toolRendering.diffTheme, "nord");
 	assert.match(selectedLine(component), /Diff theme/);
 
+	down(component);
+	enter(component);
+	assert.equal(settings.getConfig().toolRendering.subagents.enabled, false);
+	assert.match(selectedLine(component), /Codex Subagent rendering/);
+
+	down(component);
+	editValue(component, "5");
+	assert.equal(settings.getConfig().toolRendering.subagents.collapsedActivityItems, 5);
+
+	down(component);
+	editValue(component, "500");
+	assert.equal(settings.getConfig().toolRendering.subagents.expandedActivityItems, 500);
+
+	for (const key of ["showToolActivity", "showUsage", "showElapsed", "showExpandHint"] as const) {
+		down(component);
+		enter(component);
+		assert.equal(settings.getConfig().toolRendering.subagents[key], false);
+	}
+
 	component.handleInput("q");
 	assert.equal(settings.isClosed(), true);
 	await settings.waitForClose();
