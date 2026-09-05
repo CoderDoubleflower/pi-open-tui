@@ -1,4 +1,4 @@
-import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
+import { VERSION, type ExtensionContext, type Theme } from "@earendil-works/pi-coding-agent";
 import {
 	stripTerminalSequences,
 	truncateToWidth,
@@ -12,7 +12,26 @@ export const MAX_FULLSCREEN_WHEEL_SCROLL_LINES = 10;
 export const DEFAULT_FULLSCREEN_WHEEL_SCROLL_LINES = 4;
 export const FULLSCREEN_JUMP_TO_BOTTOM_WIDGET_KEY = "open-tui:jump-to-bottom";
 export const FULLSCREEN_JUMP_TO_BOTTOM_LABEL = "Jump to bottom (ctrl+End) ↓";
+export const NATIVE_FULLSCREEN_JUMP_TO_BOTTOM_VERSION = "0.85.0";
 const FULLSCREEN_JUMP_TO_BOTTOM_MOUSE_HANDLER_OWNER = Symbol("open-tui:jump-to-bottom-mouse-handler-owner");
+
+/** Only install the compatibility widget before Pi's native jump button (0.85.0). */
+export function needsLegacyFullscreenJumpToBottom(piVersion: string): boolean {
+	const match = /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(piVersion.trim());
+	// An unknown/custom version is not evidence that the legacy shim is needed.
+	if (!match) return false;
+	const current = match.slice(1, 4).map(Number);
+	if (!current.every(Number.isSafeInteger)) return false;
+	const prerelease = match[4];
+	if (prerelease?.split(".").some((part) => /^0\d+$/.test(part))) return false;
+	const native = NATIVE_FULLSCREEN_JUMP_TO_BOTTOM_VERSION.split(".").map(Number);
+	for (let index = 0; index < native.length; index++) {
+		if (current[index] !== native[index]) return current[index]! < native[index]!;
+	}
+	// SemVer prereleases sort before the corresponding stable release; build
+	// metadata does not change precedence (0.85.0+build already has the button).
+	return prerelease !== undefined;
+}
 
 export function normalizeFullscreenWheelScrollLines(
 	value: unknown,
@@ -197,7 +216,14 @@ export function createFullscreenJumpToBottomWidget(
 	return new FullscreenJumpToBottomWidget(tui, theme);
 }
 
-export function installFullscreenJumpToBottom(ctx: ExtensionContext): () => void {
+export function installFullscreenJumpToBottom(
+	ctx: ExtensionContext,
+	piVersion: string = VERSION,
+): () => void {
+	// Skip registration altogether: merely hiding the widget would still wrap
+	// Pi's mouse handler and could interfere with its native transcript controls.
+	if (!needsLegacyFullscreenJumpToBottom(piVersion)) return () => {};
+
 	let widget: (Component & { dispose(): void }) | undefined;
 	ctx.ui.setWidget(
 		FULLSCREEN_JUMP_TO_BOTTOM_WIDGET_KEY,
