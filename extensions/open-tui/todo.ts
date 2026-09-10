@@ -208,6 +208,15 @@ export function registerTodoIntegration(pi: ExtensionAPI): void {
 
 	registerTodoWriteTool(pi, controller);
 
+	// The subagent panel reinserts itself after every spinner mount. Reinsert
+	// Todo after that panel, irrespective of extension/listener registration order.
+	// This is a layout-only v1 protocol; no child output enters Todo or the chat.
+	pi.events.on("pi-simple-subagent:panel-mounted", (data) => {
+		if (!isSpinnerLifecycleEvent(data) || !currentCtx?.hasUI) return;
+		installation?.dispose();
+		installation = installTodoWidget(currentCtx, controller);
+	});
+
 	pi.events.on(SPINNER_MOUNTED_EVENT, (data) => {
 		if (!isSpinnerLifecycleEvent(data) || !currentCtx?.hasUI) return;
 
